@@ -15,6 +15,13 @@ function formatIST(date, options = {}) {
     }
 }
 
+// Helper: parse EMAIL_TO which can be a comma-separated list
+function parseRecipients() {
+    const raw = process.env.EMAIL_TO || '';
+    const list = raw.split(',').map(s => s.trim()).filter(Boolean);
+    return list.length ? list : null;
+}
+
 // Debug: Log email configuration (timestamps in IST)
 console.log('\n' + '='.repeat(50));
 console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${formatIST()}`);
@@ -42,11 +49,11 @@ let isRunning = false;
 
 // Send email for a single announcement
 async function sendEmail(announcement) {
-    const emailTo = process.env.EMAIL_TO;
+    const recipients = parseRecipients();
     const emailFrom = process.env.EMAIL_FROM || 'onboarding@resend.dev';
-    
-    if (!emailTo) {
-        return { success: false, error: 'No recipient configured' };
+
+    if (!recipients) {
+        return { success: false, error: 'No recipient configured (EMAIL_TO missing)' };
     }
 
     // Parse Cloudinary URLs or base64 images from JSON
@@ -91,7 +98,7 @@ async function sendEmail(announcement) {
 
     const emailOptions = {
         from: emailFrom,
-        to: emailTo,
+        to: recipients,
         subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${subjectDate}`,
 
         html: `
@@ -246,8 +253,8 @@ async function processUnsentAnnouncements() {
         return;
     }
 
-    const emailTo = process.env.EMAIL_TO;
-    if (!emailTo) {
+    const recipients = parseRecipients();
+    if (!recipients) {
         console.log('[Email Service] No recipient configured (EMAIL_TO not set), skipping...');
         return;
     }

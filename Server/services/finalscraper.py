@@ -7,7 +7,8 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db import get_db
 from summarizer import summarize_text
-
+from dotenv import load_dotenv
+load_dotenv()  # <-- REQUIRED so GROQ_API_KEY is available
 # Add stealth import for anti-detection
 try:
     from playwright_stealth import stealth_sync

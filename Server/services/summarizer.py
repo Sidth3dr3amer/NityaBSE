@@ -1,75 +1,101 @@
+import os
 import requests
+from typing import Optional
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.2"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama3-8b-8192"
 
-def summarize_text(title, subject, description):
+# Phrases we never want in investor summaries
+BANNED_PHRASES = [
+    "i cannot", "i can't", "unable", "not enough information",
+    "please provide", "insufficient", "cannot determine",
+    "as an ai", "i am an ai"
+]
+
+def summarize_text(
+    title: str,
+    subject: str,
+    description: Optional[str] = None
+) -> str:
     """
-    Summarize announcement using Ollama.
-    Returns summary or original description if Ollama fails.
+    Generate a 2–3 sentence investor-focused summary using Groq (LLaMA-3).
+    Guaranteed non-blocking and production-safe.
     """
-    
-    # Combine all available information
-    full_text = f"{title}. {subject}. {description if description else ''}"
-    
-    prompt = f"""You are a corporate communications expert. Create a professional 2-3 sentence summary of this BSE announcement.
 
-ANNOUNCEMENT TEXT:
+    # Build clean input
+    parts = [p for p in [title, subject, description] if p]
+    full_text = ". ".join(parts).strip()
+
+    # Hard fallback (never fail scraper)
+    fallback = subject or title or ""
+
+    # Safety guards
+    if not GROQ_API_KEY:
+        print("   [SUMMARY] GROQ_API_KEY not set, using fallback")
+        return fallback
+
+    if len(full_text) < 50:
+        return fallback
+
+    prompt = f"""
+You are a corporate disclosure analyst.
+
+Write a professional 2–3 sentence summary of the following BSE corporate announcement.
+
+RULES:
+- Be factual and concise
+- Focus on material investor-relevant information
+- Use formal business language
+- Do NOT speculate
+- Do NOT mention missing information
+
+ANNOUNCEMENT:
 {full_text}
 
-INSTRUCTIONS:
-- Write in clear, professional business language
-- State the key facts: what happened, who is involved, and when
-- Focus on material information investors need to know
-- Use active voice and present/past tense appropriately
-- Do NOT say you cannot summarize or need more information
-- Do NOT ask questions or mention missing details
-- Work with the information provided and extract the essence
-
-SUMMARY:"""
+SUMMARY:
+"""
 
     try:
         response = requests.post(
-            OLLAMA_URL,
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json={
                 "model": MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.1,  # Lower temperature for more consistent output
-                    "num_predict": 120,
-                    "top_p": 0.9,
-                    "repeat_penalty": 1.1
-                }
+                "messages": [
+                    {"role": "system", "content": "You summarize stock exchange announcements for investors."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.2,
+                "max_tokens": 180,
             },
-            timeout=30
+            timeout=12,  # Railway-safe timeout
         )
-        
-        if response.status_code == 200:
-            summary = response.json().get("response", "").strip()
-            
-            # Filter out unhelpful responses
-            unwanted_phrases = [
-                "i cannot", "i can't", "i'm unable", "no information",
-                "cannot determine", "not enough", "insufficient",
-                "please provide", "need more", "missing"
-            ]
-            
-            if summary and not any(phrase in summary.lower() for phrase in unwanted_phrases):
-                # Clean up the summary
-                summary = summary.replace("SUMMARY:", "").strip()
-                summary = summary.split('\n')[0]  # Take only first paragraph
-                
-                if len(summary) > 20:  # Ensure it's substantial
-                    print(f"   [SUMMARY] Generated summary using Ollama")
-                    return summary
-        
+
+        response.raise_for_status()
+        data = response.json()
+
+        summary = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+
+        # Quality checks
+        if (
+            summary
+            and len(summary) > 25
+            and not any(p in summary.lower() for p in BANNED_PHRASES)
+        ):
+            print("   [SUMMARY] Generated via Groq")
+            return summary.replace("SUMMARY:", "").strip()
+
     except Exception as e:
-        print(f"   [SUMMARY] Ollama not available: {e}")
-    
-    # Fallback: Create a basic summary from available text
-    fallback = subject if subject else title
-    if len(fallback) > 200:
-        fallback = fallback[:197] + "..."
-    
-    return fallback
+        print("   [SUMMARY] Groq failed:", str(e))
+
+    # Guaranteed safe fallback
+    return fallback[:200] + "..." if len(fallback) > 200 else fallback

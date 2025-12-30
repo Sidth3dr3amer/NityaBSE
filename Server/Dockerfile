@@ -1,10 +1,11 @@
 # Multi-stage build for BSE Announcements Server
 FROM node:18-slim AS base
 
-# Install Python, pip, and required system dependencies for Playwright and PyMuPDF
+# Install Python, pip, venv, and system dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    python3-venv \
     build-essential \
     wget \
     ca-certificates \
@@ -32,25 +33,11 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy and install Node.js dependencies
-COPY package*.json ./
-RUN npm ci --only=production
-
-# Copy Python requirements and install
-COPY services/requirements.txt ./services/
-# 1. Update package list and install the venv package
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-venv \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-# 2. Now create the virtual environment
+# Create and activate virtual environment
 RUN python3 -m venv /opt/venv
-
-# 3. Set the PATH so the environment is used automatically
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 4. Install your requirements
+# Copy requirements and install Python dependencies in venv
 COPY services/requirements.txt ./services/
 RUN pip install --no-cache-dir -r services/requirements.txt
 

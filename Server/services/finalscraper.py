@@ -154,11 +154,7 @@ def classify(title, description):
 def scrape_detail(page, newsid):
     detail_url = f"{BASE_URL}/corporates/AnnDet_new.aspx?newsid={newsid}"
     page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
-    try:
-        page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=30000)
-    except Exception:
-        print("[WARN] Detail container not found, continuing anyway")
-
+    page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=60000)
     
     company = page.locator("#ContentPlaceHolder1_tdCompNm a").inner_text().strip()
     security_code = page.locator("#ContentPlaceHolder1_tdCompNm .spn02").first.inner_text().strip()
@@ -328,34 +324,6 @@ def insert_announcement(conn, data):
     print(f"[INSERT] [OK] Announcement inserted")
 
 def scrape_bankex():
-    print("\n" + "="*50)
-    print(f" [DEPLOYMENT] Starting Scraper Health Check at {datetime.now()}")
-    print("="*50)
-    
-    # 1. Check Environment Variables
-    db_url = os.environ.get('DATABASE_URL')
-    print(f"[HEALTH] DATABASE_URL: {' Set' if db_url else ' MISSING'}")
-    if db_url:
-        # Mask password for safety
-        masked_url = db_url.split('@')[-1] if '@' in db_url else db_url
-        print(f"[HEALTH] DB Host: {masked_url}")
-        
-    print(f"[HEALTH] CLOUDINARY_AVAILABLE: {CLOUDINARY_AVAILABLE}")
-    print(f"[HEALTH] CLOUDINARY_CONFIGURED: {CLOUDINARY_CONFIGURED}")
-    print(f"[HEALTH] HAS_PYMUPDF: {HAS_PYMUPDF}")
-    print(f"[HEALTH] STEALTH_AVAILABLE: {STEALTH_AVAILABLE}")
-    
-    # 2. Check Network Connectivity to BSE
-    try:
-        print(f"[HEALTH] Testing connectivity to BSE ({BANKEX_URL})...")
-        test_resp = requests.get(BANKEX_URL, headers=HEADERS, timeout=6000)
-        print(f"[HEALTH] BSE Response: {test_resp.status_code} (Size: {len(test_resp.content)} bytes)")
-    except Exception as e:
-        print(f"[HEALTH] ✗ BSE CONNECTIVITY FAILED: {e}")
-        print("[HEALTH] This might mean Railway is being blocked by BSE or has no outbound access.")
-
-    print("="*50 + "\n")
-
     conn = get_db()
     
     with sync_playwright() as p:
@@ -366,12 +334,6 @@ def scrape_bankex():
         )
         context = browser.new_context(user_agent=HEADERS["User-Agent"])
         page = context.new_page()
-        page.route("**/*", lambda route: (
-    route.abort()
-    if route.request.resource_type in ["image", "font", "media"]
-    else route.continue_()
-))
-
         
         # 2. Apply Stealth to the page if available
         if STEALTH_AVAILABLE:
@@ -407,16 +369,7 @@ def scrape_bankex():
             
             try:
                 print(f"  [FLOW] Calling scrape_detail...")
-                detail_page = context.new_page()
-                page.route("**/*", lambda route: (
-    route.abort()
-    if route.request.resource_type in ["image", "font", "media"]
-    else route.continue_()
-))
-
-                data = scrape_detail(detail_page, newsid)
-                detail_page.close()
-
+                data = scrape_detail(page, newsid)
                 print(f"  [FLOW] scrape_detail returned, screenshot_url={data.get('screenshot_url')[:50] if data.get('screenshot_url') else 'None'}...")
                 insert_announcement(conn, data)
                 print("  [OK] Inserted into DB")

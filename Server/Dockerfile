@@ -46,6 +46,8 @@ RUN python3 -m playwright install-deps chromium
 
 COPY . .
 
+EXPOSE 8080
+
 RUN mkdir -p services/bankex_data
 
 ENV NODE_ENV=production

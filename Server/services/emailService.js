@@ -1,53 +1,35 @@
-const nodemailer = require('nodemailer');
+const { Sender } = require('@senderglobal/senderglobal-nodejs-sdk');
 const pool = require('../config/db');
 require('dotenv').config();
 
-// Create transporter for Gmail using SMTP (port 587, STARTTLS)
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // use STARTTLS
-    requireTLS: true,
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
-    tls: {
-        // Allow self-signed certs if necessary (use with caution)
-        rejectUnauthorized: false
-    }
+// Create Sender client
+const sender = new Sender({
+    apiKey: process.env.SENDER_API_KEY
 });
 
-// Debug: Log email configuration (without showing password)
+// Debug: Log email configuration
 console.log('\n' + '='.repeat(50));
 console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${new Date().toLocaleString()}`);
 console.log('='.repeat(50));
-console.log(`  EMAIL_USER: ${process.env.EMAIL_USER ? '✓ Set (' + process.env.EMAIL_USER + ')' : '✗ Missing'}`);
-console.log(`  EMAIL_PASS: ${process.env.EMAIL_PASS ? '✓ Set (length: ' + process.env.EMAIL_PASS.length + ')' : '✗ Missing'}`);
+console.log(`  SENDER_API_KEY: ${process.env.SENDER_API_KEY ? '✓ Set (length: ' + process.env.SENDER_API_KEY.length + ')' : '✗ Missing'}`);
+console.log(`  EMAIL_FROM: ${process.env.EMAIL_FROM ? '✓ Set (' + process.env.EMAIL_FROM + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set (' + process.env.EMAIL_TO + ')' : '✗ Missing'}`);
-
-// Verify transporter configuration on startup
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('[HEALTH] ✗ SMTP Transporter verification failed:', error.message);
-        console.error('[HEALTH] Possible reasons:');
-        console.error('  1. Port 465/587 is blocked by Railway (unlikely for Gmail)');
-        console.error('  2. Invalid App Password');
-        console.error('  3. Gmail security blocking the connection');
-    } else {
-        console.log('[HEALTH] ✓ SMTP Transporter verified successfully');
-    }
-    console.log('='.repeat(50) + '\n');
-});
+console.log('[HEALTH] ✓ Sender client initialized');
+console.log('='.repeat(50) + '\n');
 
 let isRunning = false;
 
 // Send email for a single announcement
 async function sendEmail(announcement) {
     const emailTo = process.env.EMAIL_TO;
+    const emailFrom = process.env.EMAIL_FROM;
     
     if (!emailTo) {
         return { success: false, error: 'No recipient configured' };
+    }
+
+    if (!emailFrom) {
+        return { success: false, error: 'No sender email configured' };
     }
 
     // Parse Cloudinary URLs or base64 images from JSON
@@ -87,9 +69,9 @@ async function sendEmail(announcement) {
         console.log(`   [INFO] No screenshots available (screenshot_url is null)`);
     }
 
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: emailTo,
+    const emailData = {
+        from: emailFrom,
+        to: [emailTo],
         subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${new Date().toLocaleString("en-IN", {
   day: "2-digit",
   month: "short",
@@ -223,20 +205,17 @@ async function sendEmail(announcement) {
     };
 
     try {
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`   [Email] Message sent: ${info.messageId}`);
+        const response = await sender.email.send(emailData);
+        console.log(`   [Email] Message sent: ${response.id || 'success'}`);
         return { success: true };
     } catch (error) {
         console.error(`   [Email Error] ${error.message}`);
 
         // Provide specific guidance based on error type
-        if (error.code === 'EAUTH') {
-            console.error('   [Email Error] Authentication failed. Check EMAIL_USER and EMAIL_PASS');
-            console.error('   [Email Error] Make sure EMAIL_PASS is an App Password, not your regular password');
-        } else if (error.code === 'ENOTFOUND') {
+        if (error.message && error.message.includes('API key')) {
+            console.error('   [Email Error] Authentication failed. Check SENDER_API_KEY');
+        } else if (error.message && error.message.includes('network')) {
             console.error('   [Email Error] Network issue - check internet connection');
-        } else if (error.responseCode === 535) {
-            console.error('   [Email Error] Gmail authentication failed. Verify App Password');
         }
 
         return { success: false, error: error.message };

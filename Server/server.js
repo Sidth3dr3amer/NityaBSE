@@ -10,6 +10,12 @@ app.get('/api/announcements', (req, res) => {
 });
 
 const PORT = process.env.PORT;
+
+if (!PORT) {
+  console.error('❌ PORT is not set by Railway');
+  process.exit(1);
+}
+
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('Listening on', PORT);
+  console.log('✅ Listening on', PORT);
 });

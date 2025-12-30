@@ -1,0 +1,30 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypass
+      POSTGRES_DB: mydb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  server:
+    build: ./Server
+    environment:
+      DATABASE_URL: postgres://myuser:mypass@db:5432/mydb
+      EMAIL_USER: "<...>"
+      EMAIL_PASS: "<...>"
+      CLOUDINARY_CLOUD_NAME: "<...>"
+      CLOUDINARY_API_KEY: "<...>"
+      CLOUDINARY_API_SECRET: "<...>"
+    depends_on:
+      - db
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./Server:/app
+volumes:
+  db-data:

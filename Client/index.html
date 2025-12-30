@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSE Corporate Announcements | Enterprise Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Professional Header -->
+        <header class="main-header">
+            <div class="header-content">
+                <div class="brand-section">
+                    <div class="logo-placeholder">
+                        <div class="logo-icon">BSE</div>
+                        <div class="brand-text">
+                            <div class="brand-name">Corporate Filings</div>
+                            <div class="brand-subtitle">BANKEX Announcements</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <div class="sync-status" id="lastUpdated"></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="content-wrapper">
+                <!-- Control Panel -->
+                <div class="control-panel">
+                    <div class="panel-header">
+                        <h1 class="page-title">LODR Disclosures</h1>
+                        <div class="panel-actions">
+                            <button id="refreshBtn" class="btn-action btn-primary">
+                                <span class="btn-icon">↻</span>
+                                Refresh Data
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Stats Dashboard -->
+                    <div id="statsBar" class="stats-dashboard"></div>
+
+                    <!-- Filters -->
+                    <div class="filter-section">
+                        <div class="filter-group">
+                            <label class="filter-label">Search Company</label>
+                            <input type="text" id="searchCompany" class="input-field" placeholder="Enter company name or code...">
+                        </div>
+                        <div class="filter-group">
+                            <label class="filter-label">Category</label>
+                            <select id="categoryFilter" class="select-field">
+                                <option value="">All Categories</option>
+                                <option value="agm_egm">AGM/EGM</option>
+                                <option value="board_meeting">Board Meeting</option>
+                                <option value="company_update">Company Update</option>
+                                <option value="corp_action">Corporate Action</option>
+                                <option value="insider_trading">Insider Trading / SAST</option>
+                                <option value="new_listing">New Listing</option>
+                                <option value="results">Results</option>
+                                <option value="integrated_filing">Integrated Filing</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label class="filter-label">Sort By</label>
+                            <select id="sortFilter" class="select-field">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Announcements Container -->
+                <div class="announcements-section">
+                    <div id="announcementsContainer" class="announcements-grid">
+                        <div class="loading-state">Loading announcements...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <div class="footer-content">
+                <div class="footer-info">
+                    <span>BSE BANKEX Corporate Announcements Dashboard</span>
+                    <span class="separator">|</span>
+                    <span>Data Source: Bombay Stock Exchange</span>
+                </div>
+                <div class="footer-links">
+                    <span>System Status: <span class="status-indicator status-online"></span> Online</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Preview Modal -->
+    <div id="previewModal" class="modal">
+        <div class="modal-backdrop" onclick="closePreview()"></div>
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 id="previewTitle" class="modal-title">Document Preview</h2>
+                <button class="modal-close" onclick="closePreview()">&times;</button>
+            </div>
+            <div id="previewContent" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

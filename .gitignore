@@ -1,0 +1,100 @@
+# ================================
+# Environment Variables
+# ================================
+.env
+.env.*
+**/.env
+**/.env.*
+
+# ================================
+# Node.js Dependencies
+# ================================
+node_modules/
+
+# (DO NOT ignore lock files – keep them tracked)
+# package-lock.json
+# yarn.lock
+
+# ================================
+# Python Dependencies
+# ================================
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.env/
+
+# ================================
+# Logs
+# ================================
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ================================
+# Build Outputs
+# ================================
+dist/
+build/
+out/
+
+# ================================
+# IDE / Editor Files
+# ================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ================================
+# OS Files
+# ================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ================================
+# Docker
+# ================================
+.dockerignore
+docker-compose.override.yml
+
+# ================================
+# Database Files
+# ================================
+*.sql.gz
+*.db
+*.sqlite
+*.sqlite3
+db-backups/
+
+# ================================
+# Scraped / Generated Data
+# ================================
+Server/services/bankex_data/*
+!Server/services/bankex_data/.gitkeep
+
+# ================================
+# Temporary / Cache Files
+# ================================
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# ================================
+# SSL Certificates (Never commit)
+# ================================
+*.pem
+*.key
+*.crt
+*.csr
+*.cert
+
+# ================================
+# Playwright
+# ================================
+playwright-report/
+test-results/

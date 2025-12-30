@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-NEWSID = "ae32c5a4-105c-498f-92ec-23c2b00db154"
+NEWSID = "aec58e16-15c4-461e-9c42-7d86cce1d1b5"
 DETAIL_URL = f"https://www.bseindia.com/corporates/AnnDet_new.aspx?newsid={NEWSID}"
 
 HEADERS = {

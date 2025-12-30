@@ -370,6 +370,9 @@ def scrape_bankex():
                 route.continue_()
         
         page.route("**/*", handle_route)
+        print("[WARMUP] Allowing browser context to stabilize...")
+        time.sleep(5)
+
         
         try:
             print("[MAIN] Attempting to load BANKEX page...")
@@ -419,7 +422,7 @@ def scrape_bankex():
                     except Exception as e:
                         if idx == 1:
                             print("  [WARMUP RETRY] Retrying first announcement...")
-                            time.sleep(3)
+                            time.sleep(10)
                             data = scrape_detail(detail_page, newsid)
                         else:
                             raise

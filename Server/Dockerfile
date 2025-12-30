@@ -38,7 +38,13 @@ RUN npm ci --only=production
 
 # Copy Python requirements and install
 COPY services/requirements.txt ./services/
-RUN python3 -m pip install --no-cache-dir -r services/requirements.txt
+# Create the virtual environment
+RUN python3 -m venv /opt/venv
+# Ensure the rest of the Dockerfile uses the venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Now pip install works normally without flags
+RUN pip install --no-cache-dir -r services/requirements.txt
 
 # Install Playwright browsers (chromium only for scraping)
 RUN python3 -m playwright install chromium

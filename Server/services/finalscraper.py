@@ -2,8 +2,9 @@ import os
 import json
 import requests
 import io
+import time
 from datetime import datetime
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db import get_db
 from summarizer import summarize_text
 
@@ -13,7 +14,7 @@ try:
     STEALTH_AVAILABLE = True
 except ImportError:
     STEALTH_AVAILABLE = False
-    print("[WARNING] playwright-stealth not installed. Install with: pip install playwright-stealth")
+    print("[WARNING] playwright-stealth not installed")
 
 # Optional Cloudinary support
 try:
@@ -28,27 +29,26 @@ try:
     HAS_PYMUPDF = True
 except ImportError:
     HAS_PYMUPDF = False
-    print("[WARNING] PyMuPDF not installed. PDF page screenshots will be skipped. Install with: pip install PyMuPDF")
+    print("[WARNING] PyMuPDF not installed - PDF conversion disabled")
 
 BANKEX_URL = "https://www.bseindia.com/sensex/code/53/"
 BASE_URL = "https://www.bseindia.com"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/pdf",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
     "Referer": "https://www.bseindia.com/"
 }
 
-# Cloudinary configuration via environment variables
+# Cloudinary configuration
 CLOUDINARY_CONFIGURED = False
 if CLOUDINARY_AVAILABLE:
     CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME')
     CLOUD_KEY = os.environ.get('CLOUDINARY_API_KEY')
     CLOUD_SECRET = os.environ.get('CLOUDINARY_API_SECRET')
-    
-    print(f"[CLOUDINARY] DEBUG - CLOUDINARY_AVAILABLE: {CLOUDINARY_AVAILABLE}")
-    print(f"[CLOUDINARY] DEBUG - CLOUD_NAME set: {bool(CLOUD_NAME)}")
-    print(f"[CLOUDINARY] DEBUG - CLOUD_KEY set: {bool(CLOUD_KEY)}")
-    print(f"[CLOUDINARY] DEBUG - CLOUD_SECRET set: {bool(CLOUD_SECRET)}")
     
     if CLOUD_NAME and CLOUD_KEY and CLOUD_SECRET:
         try:
@@ -59,43 +59,20 @@ if CLOUDINARY_AVAILABLE:
                 secure=True
             )
             CLOUDINARY_CONFIGURED = True
-            print(f"[CLOUDINARY] [OK] Configured for uploads (cloud_name={CLOUD_NAME})")
+            print(f"[CLOUDINARY] Configured (cloud_name={CLOUD_NAME})")
         except Exception as e:
-            print(f"[CLOUDINARY] [FAIL] Failed to configure: {e}")
-    else:
-        print(f"[CLOUDINARY] [WARN] Env vars missing - CLOUDINARY_CONFIGURED will be False")
-else:
-    print("[CLOUDINARY] [WARN] Cloudinary library not available")
+            print(f"[CLOUDINARY] Configuration failed: {e}")
+
 
 def upload_to_cloudinary(file_path, newsid, image_type, page_number=None):
     """Upload a file to Cloudinary and return the secure URL"""
-    print(f"  [CLOUDINARY] upload_to_cloudinary called: file_path={file_path}, newsid={newsid}, type={image_type}, page={page_number}")
-    print(f"  [CLOUDINARY] CLOUDINARY_CONFIGURED={CLOUDINARY_CONFIGURED}")
-    
-    if not CLOUDINARY_CONFIGURED:
-        print(f"  [CLOUDINARY] [SKIP] Skipping upload - CLOUDINARY_CONFIGURED is False")
+    if not CLOUDINARY_CONFIGURED or not os.path.exists(file_path):
         return None
-    
-    if not os.path.exists(file_path):
-        print(f"  [CLOUDINARY] [FAIL] File not found: {file_path}")
-        return None
-    
-    file_size = os.path.getsize(file_path)
-    print(f"  [CLOUDINARY] File exists, size: {file_size} bytes")
     
     try:
-        # Create a folder structure: bankex/{newsid}/
         folder = f"bankex/{newsid}"
+        public_id = f"{folder}/pdf_page_{page_number}" if page_number else f"{folder}/{image_type}"
         
-        # Create a unique public_id
-        if page_number:
-            public_id = f"{folder}/pdf_page_{page_number}"
-        else:
-            public_id = f"{folder}/{image_type}"
-        
-        print(f"  [CLOUDINARY] Uploading to folder={folder}, public_id={public_id}")
-        
-        # Upload to Cloudinary
         result = cloudinary.uploader.upload(
             file_path,
             public_id=public_id,
@@ -104,184 +81,100 @@ def upload_to_cloudinary(file_path, newsid, image_type, page_number=None):
             overwrite=True
         )
         
-        secure_url = result.get('secure_url')
-        print(f"  [CLOUDINARY] [OK] Upload successful: {secure_url}")
-        return secure_url
+        return result.get('secure_url')
         
     except Exception as e:
-        print(f"  [CLOUDINARY] [FAIL] Upload failed: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"  [CLOUDINARY] Upload failed: {e}")
         return None
 
+
 def classify(title, description):
-    text = (title + description).lower()
+    """Classify announcement based on title and description"""
+    text = (title + " " + description).lower()
     
-    # AGM/EGM
-    if "agm" in text or "egm" in text or "general meeting" in text or "annual general meeting" in text:
+    if any(term in text for term in ["agm", "egm", "general meeting", "annual general meeting"]):
         return "agm_egm"
     
-    # Board Meeting
-    if "board meeting" in text or "board" in text:
+    if "board meeting" in text or "board meet" in text:
         return "board_meeting"
     
-    # Results
-    if "financial result" in text or "results" in text or "unaudited" in text or "audited" in text:
+    if any(term in text for term in ["financial result", "quarterly result", "results", "unaudited", "audited financial"]):
         return "results"
     
-    # Corporate Action
-    if "dividend" in text or "bonus" in text or "split" in text or "buyback" in text or "corporate action" in text:
+    if any(term in text for term in ["dividend", "bonus", "split", "buyback", "corporate action", "record date"]):
         return "corp_action"
     
-    # Insider Trading / SAST
-    if "insider" in text or "sast" in text or "substantial acquisition" in text or "shareholding" in text:
+    if any(term in text for term in ["insider", "sast", "substantial acquisition", "continual disclosure"]):
         return "insider_trading"
     
-    # Company Update
-    if "update" in text or "clarification" in text or "announcement" in text:
+    if any(term in text for term in ["update", "clarification", "announcement", "press release"]):
         return "company_update"
     
-    # New Listing
-    if "listing" in text or "ipo" in text or "public offer" in text:
+    if any(term in text for term in ["listing", "ipo", "public offer", "initial public"]):
         return "new_listing"
     
-    # Integrated Filing (general filings)
-    if "filing" in text or "compliance" in text or "trading window" in text:
+    if any(term in text for term in ["filing", "compliance", "trading window", "outcome"]):
         return "integrated_filing"
     
     return "other"
 
+
 def scrape_detail(page, newsid):
+    """Scrape detailed information for a specific announcement"""
     detail_url = f"{BASE_URL}/corporates/AnnDet_new.aspx?newsid={newsid}"
-    page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
-    page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=60000)
     
+    # Retry logic for detail page
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
+            page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=30000)
+            break
+        except PlaywrightTimeoutError:
+            if attempt < max_retries - 1:
+                print(f"  [RETRY] Attempt {attempt + 1} failed, retrying detail page...")
+                time.sleep(2)
+            else:
+                raise
+    
+    # Extract basic information
     company = page.locator("#ContentPlaceHolder1_tdCompNm a").inner_text().strip()
     security_code = page.locator("#ContentPlaceHolder1_tdCompNm .spn02").first.inner_text().strip()
     title = page.locator("td.TTHeadergrey").first.inner_text().strip()
     description = page.locator("td.TTRow_leftnotices").inner_text().strip()
     
-    pdf_url = page.locator("a.tablebluelink[href$='.pdf']").first.get_attribute("href")
-    if pdf_url and not pdf_url.startswith("http"):
-        pdf_url = BASE_URL + pdf_url
-    
-    # Upload images to Cloudinary and store URLs
-    screenshot_json = None
-    print(f"\n[SCRAPE_DETAIL] Starting image capture for newsid={newsid}")
-    print(f"[SCRAPE_DETAIL] CLOUDINARY_CONFIGURED={CLOUDINARY_CONFIGURED}")
+    # Extract PDF URL
+    pdf_url = None
     try:
-        images = []
-        screenshot_dir = os.path.join(os.path.dirname(__file__), 'bankex_data', newsid)
-        os.makedirs(screenshot_dir, exist_ok=True)
-        print(f"[SCRAPE_DETAIL] Screenshot directory: {screenshot_dir}")
+        pdf_link = page.locator("a.tablebluelink[href$='.pdf']").first
+        pdf_url = pdf_link.get_attribute("href")
+        if pdf_url and not pdf_url.startswith("http"):
+            pdf_url = BASE_URL + pdf_url
+    except:
+        pass
+    
+    # Extract filing timestamp
+    try:
+        time_text = page.locator("text=Exchange Received Time").locator("xpath=..").inner_text()
+        time_str = time_text.split("Exchange Received Time")[1].split("Exchange Disseminated")[0].strip()
+        time_str_normalized = time_str.replace('-', '/')
         
-        # 1. Screenshot of announcement details section
-        announcement_screenshot_path = os.path.join(screenshot_dir, 'announcement.png')
         try:
-            print(f"[SCRAPE_DETAIL] Capturing announcement screenshot...")
-            page.locator("#ContentPlaceHolder1_tdDet").screenshot(path=announcement_screenshot_path)
-            
-            if os.path.exists(announcement_screenshot_path) and os.path.getsize(announcement_screenshot_path) > 0:
-                file_size = os.path.getsize(announcement_screenshot_path)
-                print(f"[SCRAPE_DETAIL] Screenshot captured: {file_size} bytes")
-                
-                # Try Cloudinary upload
-                print(f"[SCRAPE_DETAIL] Calling upload_to_cloudinary...")
-                cloudinary_url = upload_to_cloudinary(announcement_screenshot_path, newsid, 'announcement')
-                
-                if cloudinary_url:
-                    images.append({
-                        'filename': 'announcement_details.png',
-                        'url': cloudinary_url,
-                        'type': 'announcement'
-                    })
-                    print(f"  [SCREENSHOT] [OK] Uploaded to Cloudinary: {cloudinary_url}")
-                else:
-                    print(f"  [SCREENSHOT] [WARN] upload_to_cloudinary returned None - NOT adding fallback")
-                    print(f"  [SCREENSHOT] Images array now has {len(images)} items")
-            else:
-                print(f"[SCRAPE_DETAIL] [WARN] Screenshot file missing or empty")
-        except Exception as screenshot_err:
-            print(f"  [SCREENSHOT] [ERROR] Exception during capture: {type(screenshot_err).__name__}: {screenshot_err}")
-        
-        # 2. Download PDF and convert pages to images
-        if pdf_url and HAS_PYMUPDF:
-            try:
-                print(f"  [PDF] Downloading PDF from {pdf_url}")
-                pdf_response = requests.get(pdf_url, headers=HEADERS, timeout=30)
-                
-                if pdf_response.status_code == 200:
-                    pdf_data = io.BytesIO(pdf_response.content)
-                    pdf_document = fitz.open(stream=pdf_data, filetype="pdf")
-                    page_count = min(len(pdf_document), 5)  # Limit to first 5 pages
-                    print(f"  [PDF] Converting {page_count} page(s) to images")
-                    
-                    for page_num in range(page_count):
-                        pdf_page = pdf_document[page_num]
-                        
-                        # Render page to image (zoom=2 for better quality)
-                        mat = fitz.Matrix(2, 2)
-                        pix = pdf_page.get_pixmap(matrix=mat)
-                        
-                        # Save to file
-                        pdf_page_path = os.path.join(screenshot_dir, f'pdf_page_{page_num + 1}.png')
-                        pix.save(pdf_page_path)
-                        
-                        # Upload to Cloudinary
-                        cloudinary_url = upload_to_cloudinary(
-                            pdf_page_path, 
-                            newsid, 
-                            'pdf_page', 
-                            page_number=page_num + 1
-                        )
-                        
-                        if cloudinary_url:
-                            images.append({
-                                'filename': f'pdf_page_{page_num + 1}.png',
-                                'url': cloudinary_url,
-                                'type': 'pdf_page',
-                                'page_number': page_num + 1
-                            })
-                            print(f"  [PDF] [OK] Converted and uploaded page {page_num + 1} to Cloudinary")
-                        else:
-                            print(f"  [PDF] [WARN] upload_to_cloudinary returned None for page {page_num + 1} - NOT adding fallback")
-                    
-                    pdf_document.close()
-                else:
-                    print(f"  [PDF] Failed to download: HTTP {pdf_response.status_code}")
-                    
-            except Exception as pdf_err:
-                print(f"  [PDF] Failed to process: {pdf_err}")
-                
-        elif pdf_url and not HAS_PYMUPDF:
-            print(f"  [PDF] Skipping PDF conversion (PyMuPDF not installed)")
-        
-        # Store all image URLs as JSON
-        screenshot_json = json.dumps({'images': images})
-        if len(images) == 0:
-            print(f"  [SCREENSHOT] [WARN] No images captured! Images array is EMPTY")
-            print(f"  [SCREENSHOT] This will be stored in DB as: {screenshot_json}")
-        else:
-            cloudinary_count = sum(1 for i in images if 'url' in i)
-            base64_count = sum(1 for i in images if 'data' in i)
-            print(f"  [SCREENSHOT] [OK] Total: {len(images)} image(s) stored (Cloudinary: {cloudinary_count}, base64: {base64_count})")
-        
-    except Exception as e:
-        print(f"  [SCREENSHOT] Failed: {e}")
+            filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y  %H:%M:%S")
+    except:
+        filed_at = datetime.now()
     
-    time_text = page.locator("text=Exchange Received Time").locator("xpath=..").inner_text()
-    time_str = time_text.split("Exchange Received Time")[1].split("Exchange Disseminated")[0].strip()
+    # Capture screenshots and images
+    screenshot_json = capture_images(page, newsid, pdf_url)
     
-    # Handle both date formats: dd/mm/yyyy and dd-mm-yyyy
-    time_str_normalized = time_str.replace('-', '/')
-    
+    # Generate summary
     try:
-        filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y %H:%M:%S")
-    except ValueError:
-        filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y  %H:%M:%S")
-    
-    # Generate summary using Ollama
-    summary = summarize_text(title, title, description)
+        summary = summarize_text(title, title, description)
+    except Exception as e:
+        print(f"  [WARN] Summary generation failed: {e}")
+        summary = description[:200] + "..." if len(description) > 200 else description
     
     return {
         "id": newsid,
@@ -297,16 +190,81 @@ def scrape_detail(page, newsid):
         "source_page": detail_url
     }
 
+
+def capture_images(page, newsid, pdf_url):
+    """Capture announcement screenshot and PDF page images"""
+    images = []
+    screenshot_dir = os.path.join(os.path.dirname(__file__), 'bankex_data', newsid)
+    os.makedirs(screenshot_dir, exist_ok=True)
+    
+    # 1. Screenshot of announcement
+    announcement_screenshot_path = os.path.join(screenshot_dir, 'announcement.png')
+    try:
+        page.locator("#ContentPlaceHolder1_tdDet").screenshot(path=announcement_screenshot_path)
+        
+        if os.path.exists(announcement_screenshot_path) and os.path.getsize(announcement_screenshot_path) > 0:
+            cloudinary_url = upload_to_cloudinary(announcement_screenshot_path, newsid, 'announcement')
+            
+            if cloudinary_url:
+                images.append({
+                    'filename': 'announcement_details.png',
+                    'url': cloudinary_url,
+                    'type': 'announcement'
+                })
+    except Exception as e:
+        print(f"  [SCREENSHOT] Failed: {e}")
+    
+    # 2. PDF page conversion
+    if pdf_url and HAS_PYMUPDF:
+        try:
+            pdf_response = requests.get(pdf_url, headers=HEADERS, timeout=30)
+            
+            if pdf_response.status_code == 200:
+                pdf_data = io.BytesIO(pdf_response.content)
+                pdf_document = fitz.open(stream=pdf_data, filetype="pdf")
+                page_count = min(len(pdf_document), 5)
+                
+                for page_num in range(page_count):
+                    pdf_page = pdf_document[page_num]
+                    mat = fitz.Matrix(2, 2)
+                    pix = pdf_page.get_pixmap(matrix=mat)
+                    
+                    pdf_page_path = os.path.join(screenshot_dir, f'pdf_page_{page_num + 1}.png')
+                    pix.save(pdf_page_path)
+                    
+                    cloudinary_url = upload_to_cloudinary(
+                        pdf_page_path, 
+                        newsid, 
+                        'pdf_page', 
+                        page_number=page_num + 1
+                    )
+                    
+                    if cloudinary_url:
+                        images.append({
+                            'filename': f'pdf_page_{page_num + 1}.png',
+                            'url': cloudinary_url,
+                            'type': 'pdf_page',
+                            'page_number': page_num + 1
+                        })
+                
+                pdf_document.close()
+                print(f"  [PDF] Converted {page_count} page(s)")
+                
+        except Exception as e:
+            print(f"  [PDF] Processing failed: {e}")
+    
+    return json.dumps({'images': images})
+
+
 def announcement_exists(conn, newsid):
+    """Check if announcement already exists in database"""
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM announcements WHERE id = %s", (newsid,))
         return cur.fetchone() is not None
 
+
 def insert_announcement(conn, data):
-    print(f"\n[INSERT] Inserting announcement id={data['id']}")
-    print(f"[INSERT] screenshot_url value: {data['screenshot_url']}")
-    print(f"[INSERT] screenshot_url length: {len(data['screenshot_url']) if data['screenshot_url'] else 0}")
-    
+    """Insert announcement into database"""
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO announcements (
@@ -321,66 +279,176 @@ def insert_announcement(conn, data):
             ON CONFLICT (id) DO NOTHING;
         """, data)
     conn.commit()
-    print(f"[INSERT] [OK] Announcement inserted")
+
+
+def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
+    """Try to navigate to URL with exponential backoff retry"""
+    for attempt in range(max_retries):
+        try:
+            print(f"  [ATTEMPT {attempt + 1}/{max_retries}] Loading {url}...")
+            
+            # Increase timeout with each retry
+            current_timeout = timeout + (attempt * 30000)
+            
+            page.goto(url, wait_until="domcontentloaded", timeout=current_timeout)
+            
+            # Wait for content to appear
+            page.wait_for_selector("div.cannn ul.ullist li a", timeout=60000)
+            
+            print(f"  [SUCCESS] Page loaded successfully")
+            return True
+            
+        except PlaywrightTimeoutError as e:
+            print(f"  [TIMEOUT] Attempt {attempt + 1} failed after {current_timeout/1000}s")
+            
+            if attempt < max_retries - 1:
+                wait_time = 5 * (attempt + 1)  # 5s, 10s, 15s
+                print(f"  [WAIT] Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+            else:
+                print(f"  [FATAL] All {max_retries} attempts failed")
+                raise
+        
+        except Exception as e:
+            print(f"  [ERROR] Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(3 * (attempt + 1))
+            else:
+                raise
+    
+    return False
+
 
 def scrape_bankex():
+    """Main scraper function with enhanced retry logic"""
+    print("\n" + "="*60)
+    print(f" BANKEX SCRAPER - {datetime.now()}")
+    print("="*60)
+    print(f"[CONFIG] Cloudinary: {CLOUDINARY_CONFIGURED}")
+    print(f"[CONFIG] PyMuPDF: {HAS_PYMUPDF}")
+    print(f"[CONFIG] Stealth: {STEALTH_AVAILABLE}")
+    print("="*60 + "\n")
+    
     conn = get_db()
     
     with sync_playwright() as p:
-        # 1. Add args to reduce RAM usage and detection
+        # Launch browser with aggressive anti-detection
         browser = p.chromium.launch(
             headless=True,
-            args=['--disable-dev-shm-usage', '--no-sandbox']
+            args=[
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=IsolateOrigins,site-per-process'
+            ]
         )
-        context = browser.new_context(user_agent=HEADERS["User-Agent"])
+        
+        context = browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            viewport={'width': 1920, 'height': 1080},
+            extra_http_headers={
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+            }
+        )
+        
         page = context.new_page()
         
-        # 2. Apply Stealth to the page if available
+        # Apply stealth mode
         if STEALTH_AVAILABLE:
             stealth_sync(page)
-            print("[STEALTH] Applied stealth mode to page")
-        else:
-            print("[STEALTH] Stealth mode not available, proceeding without it")
+            print("[STEALTH] Applied to page")
         
-        print("Opening Bankex page...")
-        # 3. Change "load" to "domcontentloaded" and increase timeout
-        page.goto(BANKEX_URL, wait_until="domcontentloaded", timeout=90000)
+        # Block unnecessary resources
+        def handle_route(route):
+            if route.request.resource_type in ["image", "font", "media"]:
+                route.abort()
+            else:
+                route.continue_()
         
-        # 4. Wait for the specific element instead of the whole page
-        page.wait_for_selector("div.cannn ul.ullist li a", timeout=60000)
+        page.route("**/*", handle_route)
         
-        links = page.query_selector_all("div.cannn ul.ullist li a")
-        newsids = []
-        
-        for a in links:
-            href = a.get_attribute("href")
-            if href and "newsid=" in href:
-                newsids.append(href.split("newsid=")[1])
-        
-        print(f"\nFound {len(newsids)} announcements\n")
-        
-        for idx, newsid in enumerate(newsids, start=1):
-            print(f"\n[{idx}] ========== Processing newsid: {newsid} ==========")
+        try:
+            print("[MAIN] Attempting to load BANKEX page...")
             
-            # Check if already exists
-            if announcement_exists(conn, newsid):
-                print("  [SKIP] Already in DB, skipping")
-                continue
+            # Try loading the page with retries
+            if not try_goto_with_retries(page, BANKEX_URL, max_retries=3):
+                raise Exception("Failed to load BANKEX page after all retries")
             
+            # Extract announcement links
+            links = page.query_selector_all("div.cannn ul.ullist li a")
+            newsids = []
+            
+            for a in links:
+                href = a.get_attribute("href")
+                if href and "newsid=" in href:
+                    newsids.append(href.split("newsid=")[1])
+            
+            print(f"\n[INFO] Found {len(newsids)} announcements\n")
+            
+            if len(newsids) == 0:
+                print("[WARN] No announcements found - page may not have loaded correctly")
+                print("[DEBUG] Taking screenshot for debugging...")
+                page.screenshot(path="debug_bankex_page.png")
+            
+            success_count = 0
+            skip_count = 0
+            error_count = 0
+            
+            # Process each announcement
+            for idx, newsid in enumerate(newsids, start=1):
+                print(f"\n[{idx}/{len(newsids)}] Processing newsid: {newsid}")
+                
+                if announcement_exists(conn, newsid):
+                    print("  [SKIP] Already in database")
+                    skip_count += 1
+                    continue
+                
+                try:
+                    # Create new page for detail scraping
+                    detail_page = context.new_page()
+                    detail_page.route("**/*", handle_route)
+                    
+                    data = scrape_detail(detail_page, newsid)
+                    insert_announcement(conn, data)
+                    
+                    detail_page.close()
+                    success_count += 1
+                    print("  [SUCCESS] Inserted into database")
+                    
+                    # Small delay to avoid rate limiting
+                    time.sleep(1)
+                    
+                except Exception as e:
+                    error_count += 1
+                    print(f"  [ERROR] {type(e).__name__}: {e}")
+            
+            print("\n" + "="*60)
+            print("SCRAPING COMPLETE")
+            print(f"  Success: {success_count}")
+            print(f"  Skipped: {skip_count}")
+            print(f"  Errors:  {error_count}")
+            print("="*60 + "\n")
+            
+        except Exception as e:
+            print(f"\n[FATAL] Scraper failed: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Take debug screenshot
             try:
-                print(f"  [FLOW] Calling scrape_detail...")
-                data = scrape_detail(page, newsid)
-                print(f"  [FLOW] scrape_detail returned, screenshot_url={data.get('screenshot_url')[:50] if data.get('screenshot_url') else 'None'}...")
-                insert_announcement(conn, data)
-                print("  [OK] Inserted into DB")
-            except Exception as e:
-                print(f"  [ERROR] Failed: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
+                page.screenshot(path="debug_error.png")
+                print("[DEBUG] Error screenshot saved to debug_error.png")
+            except:
+                pass
         
-        browser.close()
-    
-    conn.close()
+        finally:
+            browser.close()
+            conn.close()
+
 
 if __name__ == "__main__":
     scrape_bankex()

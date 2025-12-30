@@ -1,4 +1,5 @@
 playwright==1.41.0
+playwright-stealth==1.0.6
 PyMuPDF==1.26.7
 cloudinary==1.44.1
 psycopg2-binary==2.9.9

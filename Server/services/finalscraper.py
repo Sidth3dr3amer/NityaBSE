@@ -7,6 +7,14 @@ from playwright.sync_api import sync_playwright
 from db import get_db
 from summarizer import summarize_text
 
+# Add stealth import for anti-detection
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+    print("[WARNING] playwright-stealth not installed. Install with: pip install playwright-stealth")
+
 # Optional Cloudinary support
 try:
     import cloudinary
@@ -319,12 +327,26 @@ def scrape_bankex():
     conn = get_db()
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # 1. Add args to reduce RAM usage and detection
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--disable-dev-shm-usage', '--no-sandbox']
+        )
         context = browser.new_context(user_agent=HEADERS["User-Agent"])
         page = context.new_page()
         
+        # 2. Apply Stealth to the page if available
+        if STEALTH_AVAILABLE:
+            stealth_sync(page)
+            print("[STEALTH] Applied stealth mode to page")
+        else:
+            print("[STEALTH] Stealth mode not available, proceeding without it")
+        
         print("Opening Bankex page...")
-        page.goto(BANKEX_URL, timeout=60000)
+        # 3. Change "load" to "domcontentloaded" and increase timeout
+        page.goto(BANKEX_URL, wait_until="domcontentloaded", timeout=90000)
+        
+        # 4. Wait for the specific element instead of the whole page
         page.wait_for_selector("div.cannn ul.ullist li a", timeout=60000)
         
         links = page.query_selector_all("div.cannn ul.ullist li a")

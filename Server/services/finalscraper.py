@@ -282,28 +282,54 @@ def insert_announcement(conn, data):
     conn.commit()
 
 
-def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
-    """Try to navigate to URL with exponential backoff retry"""
+def try_goto_with_retries(page, url, max_retries=3, initial_timeout=90000):
+    """Try to navigate to URL with smart retry logic"""
     for attempt in range(max_retries):
         try:
             print(f"  [ATTEMPT {attempt + 1}/{max_retries}] Loading {url}...")
             
-            # Increase timeout with each retry
-            current_timeout = timeout + (attempt * 30000)
+            # Start with shorter timeout, increase if needed
+            current_timeout = initial_timeout + (attempt * 30000)
             
-            page.goto(url, wait_until="domcontentloaded", timeout=current_timeout)
+            # Use 'networkidle' instead of 'domcontentloaded' for more reliable loading
+            page.goto(url, wait_until="networkidle", timeout=current_timeout)
             
-            # Wait for content to appear
-            page.wait_for_selector("div.cannn ul.ullist li a", timeout=60000)
+            print(f"  [LOADED] Page loaded, checking for content...")
             
-            print(f"  [SUCCESS] Page loaded successfully")
-            return True
+            # Try multiple selectors in case page structure varies
+            selectors_to_try = [
+                "div.cannn ul.ullist li a",
+                "ul.ullist li a",
+                ".cannn a[href*='newsid']"
+            ]
+            
+            for selector in selectors_to_try:
+                try:
+                    page.wait_for_selector(selector, timeout=15000, state="visible")
+                    print(f"  [SUCCESS] Content found with selector: {selector}")
+                    return True
+                except PlaywrightTimeoutError:
+                    continue
+            
+            # If we get here, no selector worked but page loaded
+            print(f"  [WARNING] Page loaded but expected content not found")
+            
+            # Check if page has any links at all
+            links = page.query_selector_all("a")
+            print(f"  [DEBUG] Found {len(links)} total links on page")
+            
+            # If there are links, maybe structure changed - continue anyway
+            if len(links) > 10:
+                print(f"  [CONTINUE] Proceeding despite missing expected selector")
+                return True
+            
+            raise Exception("No content found on page")
             
         except PlaywrightTimeoutError as e:
-            print(f"  [TIMEOUT] Attempt {attempt + 1} failed after {current_timeout/1000}s")
+            print(f"  [TIMEOUT] Attempt {attempt + 1} timed out after {current_timeout/1000}s")
             
             if attempt < max_retries - 1:
-                wait_time = 5 * (attempt + 1)  # 5s, 10s, 15s
+                wait_time = 3 * (attempt + 1)  # 3s, 6s, 9s
                 print(f"  [WAIT] Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
             else:
@@ -313,7 +339,7 @@ def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
         except Exception as e:
             print(f"  [ERROR] Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
             if attempt < max_retries - 1:
-                time.sleep(3 * (attempt + 1))
+                time.sleep(2 * (attempt + 1))
             else:
                 raise
     
@@ -333,7 +359,7 @@ def scrape_bankex():
     conn = get_db()
     
     with sync_playwright() as p:
-        # Launch browser with aggressive anti-detection
+        # Launch browser with anti-detection
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -343,7 +369,8 @@ def scrape_bankex():
                 '--disable-gpu',
                 '--disable-software-rasterizer',
                 '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-web-security',  # Sometimes helps with stubborn sites
             ]
         )
         
@@ -353,7 +380,10 @@ def scrape_bankex():
             extra_http_headers={
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
-            }
+            },
+            # Add more realistic browser settings
+            locale='en-US',
+            timezone_id='Asia/Kolkata',
         )
         
         page = context.new_page()
@@ -363,30 +393,52 @@ def scrape_bankex():
             stealth_sync(page)
             print("[STEALTH] Applied to page")
         
-        # Block unnecessary resources
+        # MODIFIED: More selective resource blocking - only block heavy media
         def handle_route(route):
-            if route.request.resource_type in ["image", "font", "media"]:
+            resource_type = route.request.resource_type
+            # Only block very heavy resources, allow images/fonts for proper rendering
+            if resource_type in ["media", "video"]:
                 route.abort()
             else:
                 route.continue_()
         
         page.route("**/*", handle_route)
         
+        # ADDED: Set longer default timeout for this page
+        page.set_default_timeout(90000)
+        
         try:
             print("[MAIN] Attempting to load BANKEX page...")
             
-            # Try loading the page with retries
-            if not try_goto_with_retries(page, BANKEX_URL, max_retries=3):
+            # MODIFIED: Start with 90s timeout instead of 120s
+            if not try_goto_with_retries(page, BANKEX_URL, max_retries=2, initial_timeout=90000):
                 raise Exception("Failed to load BANKEX page after all retries")
             
-            # Extract announcement links
-            links = page.query_selector_all("div.cannn ul.ullist li a")
-            newsids = []
+            # ADDED: Extra wait to ensure dynamic content loads
+            print("[WAIT] Waiting for dynamic content...")
+            time.sleep(2)
             
+            # Extract announcement links with multiple fallback methods
+            print("[EXTRACT] Extracting announcement links...")
+            
+            # Try primary method
+            links = page.query_selector_all("div.cannn ul.ullist li a")
+            
+            # Fallback methods if primary fails
+            if len(links) == 0:
+                print("[FALLBACK] Trying alternate selectors...")
+                links = page.query_selector_all("ul.ullist li a")
+            
+            if len(links) == 0:
+                links = page.query_selector_all("a[href*='newsid=']")
+            
+            newsids = []
             for a in links:
                 href = a.get_attribute("href")
                 if href and "newsid=" in href:
-                    newsids.append(href.split("newsid=")[1])
+                    newsid = href.split("newsid=")[1].split("&")[0]  # Handle any trailing params
+                    if newsid not in newsids:  # Avoid duplicates
+                        newsids.append(newsid)
             
             print(f"\n[INFO] Found {len(newsids)} announcements\n")
             
@@ -394,6 +446,10 @@ def scrape_bankex():
                 print("[WARN] No announcements found - page may not have loaded correctly")
                 print("[DEBUG] Taking screenshot for debugging...")
                 page.screenshot(path="debug_bankex_page.png")
+                
+                # ADDED: Print page content for debugging
+                print("[DEBUG] Page title:", page.title())
+                print("[DEBUG] Page URL:", page.url)
             
             success_count = 0
             skip_count = 0

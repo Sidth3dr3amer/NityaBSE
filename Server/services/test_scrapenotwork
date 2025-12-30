@@ -1,0 +1,114 @@
+import time
+from datetime import datetime
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+NEWSID = "ae32c5a4-105c-498f-92ec-23c2b00db154"
+DETAIL_URL = f"https://www.bseindia.com/corporates/AnnDet_new.aspx?newsid={NEWSID}"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+def debug_single_newsid():
+    log(f"Starting debug for newsid={NEWSID}")
+    log(f"Detail URL: {DETAIL_URL}")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        )
+
+        context = browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            viewport={"width": 1920, "height": 1080},
+        )
+
+        page = context.new_page()
+
+        # Block heavy resources (but keep JS!)
+        def route_handler(route):
+            if route.request.resource_type in ["image", "font", "media"]:
+                route.abort()
+            else:
+                route.continue_()
+
+        page.route("**/*", route_handler)
+
+        try:
+            log("Navigating to detail page...")
+            t0 = time.time()
+
+            page.goto(
+                DETAIL_URL,
+                wait_until="domcontentloaded",
+                timeout=120_000,
+            )
+
+            log(f"page.goto completed in {time.time() - t0:.2f}s")
+
+            log("Waiting for main detail selector...")
+            t1 = time.time()
+
+            page.wait_for_selector(
+                "#ContentPlaceHolder1_tdDet",
+                timeout=60_000,
+            )
+
+            log(f"Selector appeared in {time.time() - t1:.2f}s")
+
+            log("Extracting fields...")
+
+            company = page.locator(
+                "#ContentPlaceHolder1_tdCompNm a"
+            ).inner_text()
+
+            title = page.locator(
+                "td.TTHeadergrey"
+            ).first.inner_text()
+
+            description = page.locator(
+                "td.TTRow_leftnotices"
+            ).inner_text()
+
+            log("Extraction successful:")
+            print("-" * 60)
+            print("Company:", company)
+            print("Title:", title)
+            print("Description (first 300 chars):")
+            print(description[:300])
+            print("-" * 60)
+
+            log("Taking debug screenshot...")
+            page.screenshot(path=f"debug_{NEWSID}.png", full_page=True)
+
+            log("Debug completed successfully")
+
+        except PlaywrightTimeoutError as e:
+            log("❌ TIMEOUT ERROR")
+            print(e)
+            page.screenshot(path=f"timeout_{NEWSID}.png", full_page=True)
+
+        except Exception as e:
+            log("❌ GENERAL ERROR")
+            print(type(e).__name__, e)
+            page.screenshot(path=f"error_{NEWSID}.png", full_page=True)
+
+        finally:
+            browser.close()
+            log("Browser closed")
+
+if __name__ == "__main__":
+    debug_single_newsid()

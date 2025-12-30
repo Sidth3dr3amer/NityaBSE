@@ -328,6 +328,34 @@ def insert_announcement(conn, data):
     print(f"[INSERT] [OK] Announcement inserted")
 
 def scrape_bankex():
+    print("\n" + "="*50)
+    print(f"🚀 [DEPLOYMENT] Starting Scraper Health Check at {datetime.now()}")
+    print("="*50)
+    
+    # 1. Check Environment Variables
+    db_url = os.environ.get('DATABASE_URL')
+    print(f"[HEALTH] DATABASE_URL: {'✓ Set' if db_url else '✗ MISSING'}")
+    if db_url:
+        # Mask password for safety
+        masked_url = db_url.split('@')[-1] if '@' in db_url else db_url
+        print(f"[HEALTH] DB Host: {masked_url}")
+        
+    print(f"[HEALTH] CLOUDINARY_AVAILABLE: {CLOUDINARY_AVAILABLE}")
+    print(f"[HEALTH] CLOUDINARY_CONFIGURED: {CLOUDINARY_CONFIGURED}")
+    print(f"[HEALTH] HAS_PYMUPDF: {HAS_PYMUPDF}")
+    print(f"[HEALTH] STEALTH_AVAILABLE: {STEALTH_AVAILABLE}")
+    
+    # 2. Check Network Connectivity to BSE
+    try:
+        print(f"[HEALTH] Testing connectivity to BSE ({BANKEX_URL})...")
+        test_resp = requests.get(BANKEX_URL, headers=HEADERS, timeout=15)
+        print(f"[HEALTH] BSE Response: {test_resp.status_code} (Size: {len(test_resp.content)} bytes)")
+    except Exception as e:
+        print(f"[HEALTH] ✗ BSE CONNECTIVITY FAILED: {e}")
+        print("[HEALTH] This might mean Railway is being blocked by BSE or has no outbound access.")
+
+    print("="*50 + "\n")
+
     conn = get_db()
     
     with sync_playwright() as p:

@@ -17,21 +17,25 @@ const transporter = nodemailer.createTransport({
 });
 
 // Debug: Log email configuration (without showing password)
-console.log('[Email Service] Configuration:');
-console.log(`  EMAIL_USER: ${process.env.EMAIL_USER ? '✓ Set' : '✗ Missing'}`);
+console.log('\n' + '='.repeat(50));
+console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${new Date().toLocaleString()}`);
+console.log('='.repeat(50));
+console.log(`  EMAIL_USER: ${process.env.EMAIL_USER ? '✓ Set (' + process.env.EMAIL_USER + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_PASS: ${process.env.EMAIL_PASS ? '✓ Set (length: ' + process.env.EMAIL_PASS.length + ')' : '✗ Missing'}`);
-console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set' : '✗ Missing'}`);
+console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set (' + process.env.EMAIL_TO + ')' : '✗ Missing'}`);
 
 // Verify transporter configuration on startup
 transporter.verify((error, success) => {
     if (error) {
-        console.error('[Email Service] Transporter verification failed:', error.message);
-        console.error('[Email Service] Please check your EMAIL_USER and EMAIL_PASS environment variables');
-        console.error('[Email Service] Make sure you have generated an App Password from Google Account settings');
-        console.error('[Email Service] Go to: https://myaccount.google.com/apppasswords');
+        console.error('[HEALTH] ✗ SMTP Transporter verification failed:', error.message);
+        console.error('[HEALTH] Possible reasons:');
+        console.error('  1. Port 465/587 is blocked by Railway (unlikely for Gmail)');
+        console.error('  2. Invalid App Password');
+        console.error('  3. Gmail security blocking the connection');
     } else {
-        console.log('[Email Service] ✓ Transporter verified successfully');
+        console.log('[HEALTH] ✓ SMTP Transporter verified successfully');
     }
+    console.log('='.repeat(50) + '\n');
 });
 
 let isRunning = false;

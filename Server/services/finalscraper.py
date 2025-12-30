@@ -129,16 +129,32 @@ def scrape_detail(page, newsid):
     detail_url = f"{BASE_URL}/corporates/AnnDet_new.aspx?newsid={newsid}"
     
     # Retry logic for detail page
-    max_retries = 2
+    max_retries = 3
     for attempt in range(max_retries):
         try:
-            page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=30000)
+            # increase timeouts for detail pages which can be slower
+            page.goto(detail_url, timeout=90000, wait_until="domcontentloaded")
+            page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=45000)
             break
         except PlaywrightTimeoutError:
+            # attempt diagnostics on failure
+            print(f"  [RETRY] Attempt {attempt + 1} failed, retrying detail page...")
+            try:
+                # save debug screenshot and HTML to bankex_data/<newsid>/ for investigation
+                dbg_dir = os.path.join(os.path.dirname(__file__), 'bankex_data', newsid)
+                os.makedirs(dbg_dir, exist_ok=True)
+                dbg_shot = os.path.join(dbg_dir, f'detail_timeout_attempt_{attempt + 1}.png')
+                page.screenshot(path=dbg_shot)
+                with open(os.path.join(dbg_dir, f'detail_timeout_{attempt + 1}.html'), 'w', encoding='utf-8') as fh:
+                    fh.write(page.content())
+                print(f"  [DEBUG] Saved screenshot/html to {dbg_dir}")
+            except Exception as _:
+                pass
+
             if attempt < max_retries - 1:
-                print(f"  [RETRY] Attempt {attempt + 1} failed, retrying detail page...")
-                time.sleep(2)
+                wait = 2 * (attempt + 1)
+                print(f"  [WAIT] Waiting {wait}s before retry...")
+                time.sleep(wait)
             else:
                 raise
     
@@ -434,6 +450,12 @@ def scrape_bankex():
                 try:
                     detail_page = context.new_page()
                     detail_page.route("**/*", handle_route)
+                    # Apply stealth to detail pages as well
+                    if STEALTH_AVAILABLE:
+                        try:
+                            stealth_sync(detail_page)
+                        except Exception:
+                            pass
 
                     try:
                         data = scrape_detail(detail_page, newsid)

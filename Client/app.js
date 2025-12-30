@@ -1,5 +1,6 @@
 // Use environment variable or fallback to localhost for development
-const API_URL = window.ENV?.VITE_API_URL || 'http://localhost:5000/api';
+// const API_URL = window.ENV?.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = window.ENV && window.ENV.VITE_API_URL ? window.ENV.VITE_API_URL : '';
 const container = document.getElementById('announcementsContainer');
 const searchInput = document.getElementById('searchCompany');
 const categoryFilter = document.getElementById('categoryFilter');

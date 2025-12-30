@@ -32,9 +32,12 @@ app.post('/api/scrape', (req, res) => {
 app.use('/api', announcementRoutes);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  
-  // Start the scheduled scraper
-  startScheduler();
-});
+try {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    startScheduler();
+  });
+} catch (e) {
+  console.error('Failed to start server:', e);
+  process.exit(1);
+}

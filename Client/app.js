@@ -23,7 +23,9 @@ async function fetchAnnouncements() {
         if (company) params.append('company', company);
         if (category) params.append('category', category);
         
-        const response = await fetch(`${API_URL}/announcements?${params}`);
+        const url = `${API_URL}/announcements?${params}`;
+        console.log('Fetching announcements from:', url);
+        const response = await fetch(url);
         const data = await response.json();
         
         if (!data.success) {

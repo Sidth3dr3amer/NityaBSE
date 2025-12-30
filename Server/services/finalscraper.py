@@ -371,7 +371,7 @@ def scrape_bankex():
         
         page.route("**/*", handle_route)
         print("[WARMUP] Allowing browser context to stabilize...")
-        time.sleep(5)
+        time.sleep(15)
 
         
         try:

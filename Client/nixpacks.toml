@@ -1,0 +1,5 @@
+[phases.setup]
+nixpkgs = []
+
+[start]
+cmd = 'sh start.sh'

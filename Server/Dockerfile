@@ -32,6 +32,17 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# Copy and install Node.js dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy Python requirements and install
+COPY services/requirements.txt ./services/
+# 1. Update package list and install the venv package
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-venv \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment
 RUN python3 -m venv /opt/venv
@@ -65,3 +76,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Start the Node.js server
 CMD ["node", "server.js"]
+
+
+

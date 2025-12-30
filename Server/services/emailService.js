@@ -1,35 +1,42 @@
-const { Sender } = require('@senderglobal/senderglobal-nodejs-sdk');
+const { Resend } = require('resend');
 const pool = require('../config/db');
 require('dotenv').config();
 
-// Create Sender client
-const sender = new Sender({
-    apiKey: process.env.SENDER_API_KEY
-});
+// Create Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Debug: Log email configuration
 console.log('\n' + '='.repeat(50));
 console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${new Date().toLocaleString()}`);
 console.log('='.repeat(50));
-console.log(`  SENDER_API_KEY: ${process.env.SENDER_API_KEY ? '✓ Set (length: ' + process.env.SENDER_API_KEY.length + ')' : '✗ Missing'}`);
+console.log(`  RESEND_API_KEY: ${process.env.RESEND_API_KEY ? '✓ Set (length: ' + process.env.RESEND_API_KEY.length + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_FROM: ${process.env.EMAIL_FROM ? '✓ Set (' + process.env.EMAIL_FROM + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set (' + process.env.EMAIL_TO + ')' : '✗ Missing'}`);
-console.log('[HEALTH] ✓ Sender client initialized');
-console.log('='.repeat(50) + '\n');
+
+// Verify Resend configuration on startup
+(async () => {
+    try {
+        // Test the API key by making a simple request
+        if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM) {
+            console.log('[HEALTH] ✓ Resend client initialized successfully');
+        } else {
+            console.log('[HEALTH] ✗ Missing required environment variables');
+        }
+    } catch (error) {
+        console.error('[HEALTH] ✗ Resend initialization failed:', error.message);
+    }
+    console.log('='.repeat(50) + '\n');
+})();
 
 let isRunning = false;
 
 // Send email for a single announcement
 async function sendEmail(announcement) {
     const emailTo = process.env.EMAIL_TO;
-    const emailFrom = process.env.EMAIL_FROM;
+    const emailFrom = process.env.EMAIL_FROM || 'onboarding@resend.dev';
     
     if (!emailTo) {
         return { success: false, error: 'No recipient configured' };
-    }
-
-    if (!emailFrom) {
-        return { success: false, error: 'No sender email configured' };
     }
 
     // Parse Cloudinary URLs or base64 images from JSON
@@ -69,9 +76,9 @@ async function sendEmail(announcement) {
         console.log(`   [INFO] No screenshots available (screenshot_url is null)`);
     }
 
-    const emailData = {
+    const emailOptions = {
         from: emailFrom,
-        to: [emailTo],
+        to: emailTo,
         subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${new Date().toLocaleString("en-IN", {
   day: "2-digit",
   month: "short",
@@ -205,17 +212,23 @@ async function sendEmail(announcement) {
     };
 
     try {
-        const response = await sender.email.send(emailData);
-        console.log(`   [Email] Message sent: ${response.id || 'success'}`);
+        const { data, error } = await resend.emails.send(emailOptions);
+        
+        if (error) {
+            console.error(`   [Email Error] ${error.message}`);
+            return { success: false, error: error.message };
+        }
+        
+        console.log(`   [Email] Message sent: ${data.id}`);
         return { success: true };
     } catch (error) {
         console.error(`   [Email Error] ${error.message}`);
 
         // Provide specific guidance based on error type
-        if (error.message && error.message.includes('API key')) {
-            console.error('   [Email Error] Authentication failed. Check SENDER_API_KEY');
-        } else if (error.message && error.message.includes('network')) {
-            console.error('   [Email Error] Network issue - check internet connection');
+        if (error.message.includes('API key')) {
+            console.error('   [Email Error] Invalid API key. Check RESEND_API_KEY');
+        } else if (error.message.includes('from')) {
+            console.error('   [Email Error] Invalid sender email. Check EMAIL_FROM');
         }
 
         return { success: false, error: error.message };

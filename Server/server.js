@@ -67,17 +67,18 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-try {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+
+  // Delay heavy startup work
+  setTimeout(() => {
     try {
       startScheduler();
       console.log('[SCHEDULER] Started successfully');
-    } catch (schedErr) {
-      console.error('[SCHEDULER] Failed to start:', schedErr);
+    } catch (err) {
+      console.error('[SCHEDULER] Failed:', err);
     }
-  });
-} catch (e) {
-  console.error('Failed to start server:', e);
-  process.exit(1);
-}
+  }, 10000);
+});
+

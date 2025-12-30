@@ -8,6 +8,29 @@ const transporter = nodemailer.createTransport({
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
+    },
+    // Additional Gmail-specific settings
+    secure: true,
+    tls: {
+        rejectUnauthorized: false
+    }
+});
+
+// Debug: Log email configuration (without showing password)
+console.log('[Email Service] Configuration:');
+console.log(`  EMAIL_USER: ${process.env.EMAIL_USER ? '✓ Set' : '✗ Missing'}`);
+console.log(`  EMAIL_PASS: ${process.env.EMAIL_PASS ? '✓ Set (length: ' + process.env.EMAIL_PASS.length + ')' : '✗ Missing'}`);
+console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set' : '✗ Missing'}`);
+
+// Verify transporter configuration on startup
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('[Email Service] Transporter verification failed:', error.message);
+        console.error('[Email Service] Please check your EMAIL_USER and EMAIL_PASS environment variables');
+        console.error('[Email Service] Make sure you have generated an App Password from Google Account settings');
+        console.error('[Email Service] Go to: https://myaccount.google.com/apppasswords');
+    } else {
+        console.log('[Email Service] ✓ Transporter verified successfully');
     }
 });
 
@@ -194,9 +217,22 @@ async function sendEmail(announcement) {
     };
 
     try {
-        await transporter.sendMail(mailOptions);
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`   [Email] Message sent: ${info.messageId}`);
         return { success: true };
     } catch (error) {
+        console.error(`   [Email Error] ${error.message}`);
+
+        // Provide specific guidance based on error type
+        if (error.code === 'EAUTH') {
+            console.error('   [Email Error] Authentication failed. Check EMAIL_USER and EMAIL_PASS');
+            console.error('   [Email Error] Make sure EMAIL_PASS is an App Password, not your regular password');
+        } else if (error.code === 'ENOTFOUND') {
+            console.error('   [Email Error] Network issue - check internet connection');
+        } else if (error.responseCode === 535) {
+            console.error('   [Email Error] Gmail authentication failed. Verify App Password');
+        }
+
         return { success: false, error: error.message };
     }
 }

@@ -22,7 +22,7 @@ async function fetchAnnouncements() {
         if (company) params.append('company', company);
         if (category) params.append('category', category);
         
-        const response = await fetch(`${API_URL}/announcements?${params}`);
+        const response = await fetch(`${VITE_API_URL}/announcements?${params}`);
         const data = await response.json();
         
         if (!data.success) {

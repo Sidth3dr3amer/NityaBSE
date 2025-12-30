@@ -262,10 +262,10 @@ function debounceSearch() {
     }, 500);
 }
 
-searchInput.addEventListener('input', debounceSearch);
-categoryFilter.addEventListener('change', fetchAnnouncements);
-sortFilter.addEventListener('change', applySortAndDisplay);
-refreshBtn.addEventListener('click', fetchAnnouncements);
+if (searchInput) searchInput.addEventListener('input', debounceSearch);
+if (categoryFilter) categoryFilter.addEventListener('change', fetchAnnouncements);
+if (sortFilter) sortFilter.addEventListener('change', applySortAndDisplay);
+if (refreshBtn) refreshBtn.addEventListener('click', fetchAnnouncements);
 
 // Preview Modal Functions
 function openPreview(url, type, companyName) {

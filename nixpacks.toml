@@ -3,14 +3,14 @@ nixPkgs = ['nodejs_18', 'python311', 'python311Packages.pip']
 
 [phases.install]
 cmds = [
-    'npm install',
-    'pip install -r services/requirements.txt',
-    'npx playwright install chromium',
-    'npx playwright install-deps chromium'
+    'cd Server && npm install',
+    'cd Server && pip install -r services/requirements.txt',
+    'cd Server && npx playwright install chromium',
+    'cd Server && npx playwright install-deps chromium'
 ]
 
 [phases.build]
 cmds = ['echo "Build complete"']
 
 [start]
-cmd = 'node server.js'
+cmd = 'cd Server && node server.js'

@@ -154,7 +154,11 @@ def classify(title, description):
 def scrape_detail(page, newsid):
     detail_url = f"{BASE_URL}/corporates/AnnDet_new.aspx?newsid={newsid}"
     page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
-    page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=60000)
+    try:
+        page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=30000)
+    except Exception:
+        print("[WARN] Detail container not found, continuing anyway")
+
     
     company = page.locator("#ContentPlaceHolder1_tdCompNm a").inner_text().strip()
     security_code = page.locator("#ContentPlaceHolder1_tdCompNm .spn02").first.inner_text().strip()
@@ -334,6 +338,12 @@ def scrape_bankex():
         )
         context = browser.new_context(user_agent=HEADERS["User-Agent"])
         page = context.new_page()
+        page.route("**/*", lambda route: (
+    route.abort()
+    if route.request.resource_type in ["image", "font", "media"]
+    else route.continue_()
+))
+
         
         # 2. Apply Stealth to the page if available
         if STEALTH_AVAILABLE:
@@ -369,7 +379,16 @@ def scrape_bankex():
             
             try:
                 print(f"  [FLOW] Calling scrape_detail...")
-                data = scrape_detail(page, newsid)
+                detail_page = context.new_page()
+                page.route("**/*", lambda route: (
+    route.abort()
+    if route.request.resource_type in ["image", "font", "media"]
+    else route.continue_()
+))
+
+                data = scrape_detail(detail_page, newsid)
+                detail_page.close()
+
                 print(f"  [FLOW] scrape_detail returned, screenshot_url={data.get('screenshot_url')[:50] if data.get('screenshot_url') else 'None'}...")
                 insert_announcement(conn, data)
                 print("  [OK] Inserted into DB")

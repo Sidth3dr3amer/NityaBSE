@@ -27,8 +27,6 @@ COPY --from=base /app/*.js /usr/share/nginx/html/
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Expose port 80
-EXPOSE 80
 
 # Use custom start script
 CMD ["/start.sh"]

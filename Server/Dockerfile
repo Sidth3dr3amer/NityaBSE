@@ -38,12 +38,20 @@ RUN npm ci --only=production
 
 # Copy Python requirements and install
 COPY services/requirements.txt ./services/
-# Create the virtual environment
+# 1. Update package list and install the venv package
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-venv \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Now create the virtual environment
 RUN python3 -m venv /opt/venv
-# Ensure the rest of the Dockerfile uses the venv
+
+# 3. Set the PATH so the environment is used automatically
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Now pip install works normally without flags
+# 4. Install your requirements
+COPY services/requirements.txt ./services/
 RUN pip install --no-cache-dir -r services/requirements.txt
 
 # Install Playwright browsers (chromium only for scraping)

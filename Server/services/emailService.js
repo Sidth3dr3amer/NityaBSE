@@ -5,9 +5,19 @@ require('dotenv').config();
 // Create Resend client
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Debug: Log email configuration
+// Helper: format dates in IST (Asia/Kolkata)
+function formatIST(date, options = {}) {
+    try {
+        const d = date ? new Date(date) : new Date();
+        return new Intl.DateTimeFormat('en-IN', Object.assign({ timeZone: 'Asia/Kolkata' }, options)).format(d);
+    } catch (e) {
+        return String(date || '');
+    }
+}
+
+// Debug: Log email configuration (timestamps in IST)
 console.log('\n' + '='.repeat(50));
-console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${new Date().toLocaleString()}`);
+console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${formatIST()}`);
 console.log('='.repeat(50));
 console.log(`  RESEND_API_KEY: ${process.env.RESEND_API_KEY ? '✓ Set (length: ' + process.env.RESEND_API_KEY.length + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_FROM: ${process.env.EMAIL_FROM ? '✓ Set (' + process.env.EMAIL_FROM + ')' : '✗ Missing'}`);
@@ -76,16 +86,13 @@ async function sendEmail(announcement) {
         console.log(`   [INFO] No screenshots available (screenshot_url is null)`);
     }
 
+    const subjectDateOpts = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+    const subjectDate = announcement.filed_at ? formatIST(announcement.filed_at, subjectDateOpts) : formatIST();
+
     const emailOptions = {
         from: emailFrom,
         to: emailTo,
-        subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${new Date().toLocaleString("en-IN", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit"
-})}`,
+        subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${subjectDate}`,
 
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
@@ -127,13 +134,10 @@ async function sendEmail(announcement) {
 
                 <div style="margin: 20px 0; background: #f8f9fa; padding: 15px; border-radius: 8px;">
                     <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>📅 Filing Date:</strong> ${new Date(announcement.filed_at).toLocaleString('en-IN', { 
-                            year: 'numeric', month: 'long', day: 'numeric', 
-                            hour: '2-digit', minute: '2-digit', hour12: true 
-                        })}
+                        <strong>📅 Filing Date:</strong> ${formatIST(announcement.filed_at, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
                     </p>
                     <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>📝 Scraped:</strong> ${announcement.scraped_at ? new Date(announcement.scraped_at).toLocaleString('en-IN') : 'Just now'}
+                        <strong>📝 Scraped:</strong> ${announcement.scraped_at ? formatIST(announcement.scraped_at) : 'Just now'}
                     </p>
                     ${announcement.source_page ? `
                     <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">

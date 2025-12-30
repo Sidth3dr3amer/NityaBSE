@@ -7,6 +7,11 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db import get_db
 from summarizer import summarize_text
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+
+now_ist = datetime.now(IST)
 
 # Add stealth import for anti-detection
 try:
@@ -160,12 +165,13 @@ def scrape_detail(page, newsid):
         time_str_normalized = time_str.replace('-', '/')
         
         try:
-            filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y %H:%M:%S")
+            filed_naive = datetime.strptime(time_str_normalized, "%d/%m/%Y %H:%M:%S")
         except ValueError:
-            filed_at = datetime.strptime(time_str_normalized, "%d/%m/%Y  %H:%M:%S")
+            filed_naive = datetime.strptime(time_str_normalized, "%d/%m/%Y  %H:%M:%S")
+        # Attach IST tzinfo to parsed datetime
+        filed_at = filed_naive.replace(tzinfo=IST)
     except:
-        filed_at = datetime.now()
-    
+        filed_at = datetime.now(IST)
     # Capture screenshots and images
     screenshot_json = capture_images(page, newsid, pdf_url)
     
@@ -176,6 +182,18 @@ def scrape_detail(page, newsid):
         print(f"  [WARN] Summary generation failed: {e}")
         summary = description[:200] + "..." if len(description) > 200 else description
     
+    # Normalize filed_at to an IST ISO8601 string for DB/storage
+    try:
+        if isinstance(filed_at, datetime):
+            if filed_at.tzinfo is None:
+                filed_at = filed_at.replace(tzinfo=IST)
+            else:
+                filed_at = filed_at.astimezone(IST)
+
+        filed_at_iso = filed_at.isoformat()
+    except Exception:
+        filed_at_iso = datetime.now(IST).isoformat()
+
     return {
         "id": newsid,
         "company_code": security_code,
@@ -184,7 +202,7 @@ def scrape_detail(page, newsid):
         "subject": title,
         "summary": summary,
         "category": classify(title, description),
-        "filed_at": filed_at,
+        "filed_at": filed_at_iso,
         "pdf_url": pdf_url,
         "screenshot_url": screenshot_json,
         "source_page": detail_url
@@ -322,7 +340,7 @@ def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
 def scrape_bankex():
     """Main scraper function with enhanced retry logic"""
     print("\n" + "="*60)
-    print(f" BANKEX SCRAPER - {datetime.now()}")
+    print(f" BANKEX SCRAPER - {datetime.now(IST)}")
     print("="*60)
     print(f"[CONFIG] Cloudinary: {CLOUDINARY_CONFIGURED}")
     print(f"[CONFIG] PyMuPDF: {HAS_PYMUPDF}")

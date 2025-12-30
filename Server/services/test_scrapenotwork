@@ -1,6 +1,12 @@
 import time
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+
+now_ist = datetime.now(IST)
 
 NEWSID = "aec58e16-15c4-461e-9c42-7d86cce1d1b5"
 DETAIL_URL = f"https://www.bseindia.com/corporates/AnnDet_new.aspx?newsid={NEWSID}"
@@ -14,7 +20,7 @@ HEADERS = {
 }
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    print(f"[{datetime.now(ZoneInfo("Asia/Kolkata")).strftime('%H:%M:%S')}] {msg}")
 
 def debug_single_newsid():
     log(f"Starting debug for newsid={NEWSID}")

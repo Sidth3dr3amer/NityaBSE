@@ -347,8 +347,23 @@ async function processUnsentAnnouncements() {
         const duration = ((endTime - startTime) / 1000).toFixed(2);
         console.log(`[Email Service] Completed in ${duration}s - Sent: ${sentCount}, Failed: ${failedCount}`);
 
-    } catch (error) {
-        console.error(`[Email Service] Error: ${error.message}`);
+    }   catch (error) {
+    console.error('   [Email Error] HTTP Status:', error.status || error.response?.status);
+    console.error('   [Email Error] Message:', error.message);
+
+    if (error.response?.body) {
+        console.error('   [Email Error] Response body:', JSON.stringify(error.response.body, null, 2));
+    }
+
+    if (error.response?.text) {
+        console.error('   [Email Error] Raw response:', error.response.text);
+    }
+
+    console.error('   [Email Error] Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+
+    return { success: false, error: error.message };
+
+
     } finally {
         isRunning = false;
     }

@@ -8,7 +8,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 now_ist = datetime.now(IST)
 
-NEWSID = "aec58e16-15c4-461e-9c42-7d86cce1d1b5"
+NEWSID = "11ab70ce-7d89-4e4a-a3f7-8ce82529f2b3"
 DETAIL_URL = f"https://www.bseindia.com/corporates/AnnDet_new.aspx?newsid={NEWSID}"
 
 HEADERS = {

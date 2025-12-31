@@ -3,6 +3,7 @@ import json
 import requests
 import io
 import time
+import random
 from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db import get_db
@@ -124,22 +125,33 @@ def classify(title, description):
     return "other"
 
 
-def scrape_detail(page, newsid):
-    """Scrape detailed information for a specific announcement"""
+def scrape_detail(page, newsid, max_retries=3):
+    """Scrape detailed information for a specific announcement with retries"""
     detail_url = f"{BASE_URL}/corporates/AnnDet_new.aspx?newsid={newsid}"
     
     # Retry logic for detail page
-    max_retries = 2
     for attempt in range(max_retries):
         try:
-            page.goto(detail_url, timeout=60000, wait_until="domcontentloaded")
-            page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=30000)
+            # Add random delay to appear more human-like
+            time.sleep(random.uniform(1.5, 3.5))
+            
+            page.goto(detail_url, timeout=90000, wait_until="domcontentloaded")
+            
+            # Wait for the main content with longer timeout
+            page.wait_for_selector("#ContentPlaceHolder1_tdDet", timeout=45000)
+            
+            # Additional wait for dynamic content to load
+            time.sleep(2)
+            
             break
+            
         except PlaywrightTimeoutError:
             if attempt < max_retries - 1:
-                print(f"  [RETRY] Attempt {attempt + 1} failed, retrying detail page...")
-                time.sleep(2)
+                wait_time = 5 * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                print(f"  [RETRY] Attempt {attempt + 1} failed, waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
             else:
+                print(f"  [FATAL] All {max_retries} attempts failed for newsid {newsid}")
                 raise
     
     # Extract basic information
@@ -172,6 +184,7 @@ def scrape_detail(page, newsid):
         filed_at = filed_naive.replace(tzinfo=IST)
     except:
         filed_at = datetime.now(IST)
+    
     # Capture screenshots and images
     screenshot_json = capture_images(page, newsid, pdf_url)
     
@@ -299,19 +312,28 @@ def insert_announcement(conn, data):
     conn.commit()
 
 
-def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
+def try_goto_with_retries(page, url, max_retries=4, base_timeout=120000):
     """Try to navigate to URL with exponential backoff retry"""
     for attempt in range(max_retries):
         try:
             print(f"  [ATTEMPT {attempt + 1}/{max_retries}] Loading {url}...")
             
             # Increase timeout with each retry
-            current_timeout = timeout + (attempt * 30000)
+            current_timeout = base_timeout + (attempt * 40000)
             
-            page.goto(url, wait_until="domcontentloaded", timeout=current_timeout)
+            # Add random delay between attempts to appear more human
+            if attempt > 0:
+                delay = random.uniform(3, 8)
+                print(f"  [DELAY] Waiting {delay:.1f}s before attempt...")
+                time.sleep(delay)
             
-            # Wait for content to appear
-            page.wait_for_selector("div.cannn ul.ullist li a", timeout=60000)
+            page.goto(url, wait_until="networkidle", timeout=current_timeout)
+            
+            # Wait for content to appear with increased timeout
+            page.wait_for_selector("div.cannn ul.ullist li a", timeout=90000)
+            
+            # Additional wait to ensure all content is loaded
+            time.sleep(3)
             
             print(f"  [SUCCESS] Page loaded successfully")
             return True
@@ -320,8 +342,8 @@ def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
             print(f"  [TIMEOUT] Attempt {attempt + 1} failed after {current_timeout/1000}s")
             
             if attempt < max_retries - 1:
-                wait_time = 5 * (attempt + 1)  # 5s, 10s, 15s
-                print(f"  [WAIT] Waiting {wait_time}s before retry...")
+                wait_time = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                print(f"  [WAIT] Exponential backoff: {wait_time}s before retry...")
                 time.sleep(wait_time)
             else:
                 print(f"  [FATAL] All {max_retries} attempts failed")
@@ -330,7 +352,7 @@ def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
         except Exception as e:
             print(f"  [ERROR] Attempt {attempt + 1} failed: {type(e).__name__}: {e}")
             if attempt < max_retries - 1:
-                time.sleep(3 * (attempt + 1))
+                time.sleep(5 * (2 ** attempt))
             else:
                 raise
     
@@ -338,7 +360,7 @@ def try_goto_with_retries(page, url, max_retries=3, timeout=120000):
 
 
 def scrape_bankex():
-    """Main scraper function with enhanced retry logic"""
+    """Main scraper function with enhanced retry logic and reliability"""
     print("\n" + "="*60)
     print(f" BANKEX SCRAPER - {datetime.now(IST)}")
     print("="*60)
@@ -360,7 +382,9 @@ def scrape_bankex():
                 '--disable-gpu',
                 '--disable-software-rasterizer',
                 '--disable-blink-features=AutomationControlled',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
             ]
         )
         
@@ -370,7 +394,10 @@ def scrape_bankex():
             extra_http_headers={
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
-            }
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            java_script_enabled=True,
+            ignore_https_errors=True
         )
         
         page = context.new_page()
@@ -380,27 +407,27 @@ def scrape_bankex():
             stealth_sync(page)
             print("[STEALTH] Applied to page")
         
-        # Block unnecessary resources
+        # Less aggressive resource blocking - only block media
         def handle_route(route):
-            if route.request.resource_type in ["image", "font", "media"]:
+            resource_type = route.request.resource_type
+            if resource_type in ["media", "font"]:
                 route.abort()
             else:
                 route.continue_()
         
         page.route("**/*", handle_route)
+        
+        # Longer warm-up period
         print("[WARMUP] Allowing browser context to stabilize...")
-        time.sleep(15)
-
+        time.sleep(25)
         
         try:
             print("[MAIN] Attempting to load BANKEX page...")
             
             # Try loading the page with retries
-            if not try_goto_with_retries(page, BANKEX_URL, max_retries=3):
-                time.sleep(3)
+            if not try_goto_with_retries(page, BANKEX_URL, max_retries=4):
+                time.sleep(5)
                 raise Exception("Failed to load BANKEX page after all retries")
-               
-
             
             # Extract announcement links
             links = page.query_selector_all("div.cannn ul.ullist li a")
@@ -417,6 +444,20 @@ def scrape_bankex():
                 print("[WARN] No announcements found - page may not have loaded correctly")
                 print("[DEBUG] Taking screenshot for debugging...")
                 page.screenshot(path="debug_bankex_page.png")
+                
+                # Try one more time after longer wait
+                print("[RETRY] Attempting one final reload...")
+                time.sleep(15)
+                page.reload(wait_until="networkidle", timeout=120000)
+                time.sleep(5)
+                
+                links = page.query_selector_all("div.cannn ul.ullist li a")
+                for a in links:
+                    href = a.get_attribute("href")
+                    if href and "newsid=" in href:
+                        newsids.append(href.split("newsid=")[1])
+                
+                print(f"[RETRY RESULT] Found {len(newsids)} announcements after retry")
             
             success_count = 0
             skip_count = 0
@@ -431,38 +472,50 @@ def scrape_bankex():
                     skip_count += 1
                     continue
                 
-                try:
-                    detail_page = context.new_page()
-                    detail_page.route("**/*", handle_route)
-
+                max_announcement_retries = 3
+                announcement_success = False
+                
+                for ann_attempt in range(max_announcement_retries):
                     try:
-                        data = scrape_detail(detail_page, newsid)
+                        detail_page = context.new_page()
+                        detail_page.route("**/*", handle_route)
+                        
+                        data = scrape_detail(detail_page, newsid, max_retries=3)
+                        insert_announcement(conn, data)
+                        
+                        detail_page.close()
+                        success_count += 1
+                        announcement_success = True
+                        print("  [SUCCESS] Inserted into database")
+                        break
+                        
                     except Exception as e:
-                        if idx == 1:
-                            print("  [WARMUP RETRY] Retrying first announcement...")
-                            time.sleep(10)
-                            data = scrape_detail(detail_page, newsid)
+                        print(f"  [ERROR] Attempt {ann_attempt + 1}/{max_announcement_retries}: {type(e).__name__}: {e}")
+                        
+                        try:
+                            detail_page.close()
+                        except:
+                            pass
+                        
+                        if ann_attempt < max_announcement_retries - 1:
+                            wait_time = 5 * (ann_attempt + 1)
+                            print(f"  [RETRY] Waiting {wait_time}s before retry...")
+                            time.sleep(wait_time)
                         else:
-                            raise
-
-                    insert_announcement(conn, data)
-
-                    detail_page.close()
-                    success_count += 1
-                    print("  [SUCCESS] Inserted into database")
-
-                    time.sleep(1)
-
-                except Exception as e:
-                    error_count += 1
-                    print(f"  [ERROR] {type(e).__name__}: {e}")
-
+                            error_count += 1
+                            print(f"  [FAILED] Could not process after {max_announcement_retries} attempts")
+                
+                # Human-like delay between announcements
+                if announcement_success and idx < len(newsids):
+                    delay = random.uniform(2, 4)
+                    time.sleep(delay)
             
             print("\n" + "="*60)
             print("SCRAPING COMPLETE")
             print(f"  Success: {success_count}")
             print(f"  Skipped: {skip_count}")
             print(f"  Errors:  {error_count}")
+            print(f"  Total:   {len(newsids)}")
             print("="*60 + "\n")
             
         except Exception as e:

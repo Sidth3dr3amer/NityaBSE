@@ -1,9 +1,11 @@
-const { Resend } = require('resend');
+const SibApiV3Sdk = require('@getbrevo/brevo');
 const pool = require('../config/db');
 require('dotenv').config();
 
-// Create Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Create Brevo API client
+const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+const apiKey = apiInstance.authentications['apiKey'];
+apiKey.apiKey = process.env.BREVO_API_KEY;
 
 // Helper: format dates in IST (Asia/Kolkata)
 function formatIST(date, options = {}) {
@@ -19,28 +21,39 @@ function formatIST(date, options = {}) {
 function parseRecipients() {
     const raw = process.env.EMAIL_TO || '';
     const list = raw.split(',').map(s => s.trim()).filter(Boolean);
-    return list.length ? list : null;
+    return list.length ? list.map(email => ({ email })) : null;
 }
 
 // Debug: Log email configuration (timestamps in IST)
 console.log('\n' + '='.repeat(50));
 console.log(`🚀 [DEPLOYMENT] Email Service Health Check at ${formatIST()}`);
 console.log('='.repeat(50));
-console.log(`  RESEND_API_KEY: ${process.env.RESEND_API_KEY ? '✓ Set (length: ' + process.env.RESEND_API_KEY.length + ')' : '✗ Missing'}`);
+console.log(`  BREVO_API_KEY: ${process.env.BREVO_API_KEY ? '✓ Set (length: ' + process.env.BREVO_API_KEY.length + ')' : '✗ Missing'}`);
 console.log(`  EMAIL_FROM: ${process.env.EMAIL_FROM ? '✓ Set (' + process.env.EMAIL_FROM + ')' : '✗ Missing'}`);
+console.log(`  EMAIL_FROM_NAME: ${process.env.EMAIL_FROM_NAME ? '✓ Set (' + process.env.EMAIL_FROM_NAME + ')' : 'Not Set (will use email)'}`);
 console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set (' + process.env.EMAIL_TO + ')' : '✗ Missing'}`);
 
-// Verify Resend configuration on startup
+// Verify Brevo configuration on startup
 (async () => {
     try {
-        // Test the API key by making a simple request
-        if (process.env.RESEND_API_KEY && process.env.EMAIL_FROM) {
-            console.log('[HEALTH] ✓ Resend client initialized successfully');
+        if (process.env.BREVO_API_KEY && process.env.EMAIL_FROM) {
+            // Test API connection by getting account info
+            const accountApi = new SibApiV3Sdk.AccountApi();
+            accountApi.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY;
+            
+            try {
+                const account = await accountApi.getAccount();
+                console.log('[HEALTH] ✓ Brevo API connected successfully');
+                console.log(`[HEALTH] Account: ${account.email} | Plan: ${account.plan[0].type}`);
+            } catch (err) {
+                console.error('[HEALTH] ✗ Brevo API connection failed:', err.message);
+                console.error('[HEALTH] Check your BREVO_API_KEY');
+            }
         } else {
             console.log('[HEALTH] ✗ Missing required environment variables');
         }
     } catch (error) {
-        console.error('[HEALTH] ✗ Resend initialization failed:', error.message);
+        console.error('[HEALTH] ✗ Brevo initialization failed:', error.message);
     }
     console.log('='.repeat(50) + '\n');
 })();
@@ -50,10 +63,15 @@ let isRunning = false;
 // Send email for a single announcement
 async function sendEmail(announcement) {
     const recipients = parseRecipients();
-    const emailFrom = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+    const emailFrom = process.env.EMAIL_FROM;
+    const emailFromName = process.env.EMAIL_FROM_NAME || 'BSE BANKEX Alerts';
 
     if (!recipients) {
         return { success: false, error: 'No recipient configured (EMAIL_TO missing)' };
+    }
+
+    if (!emailFrom) {
+        return { success: false, error: 'No sender configured (EMAIL_FROM missing)' };
     }
 
     // Parse Cloudinary URLs or base64 images from JSON
@@ -96,150 +114,146 @@ async function sendEmail(announcement) {
     const subjectDateOpts = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
     const subjectDate = announcement.filed_at ? formatIST(announcement.filed_at, subjectDateOpts) : formatIST();
 
-    const emailOptions = {
-        from: emailFrom,
-        to: recipients,
-        subject: `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${subjectDate}`,
-
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
-                <h2 style="color: #1a2332; border-bottom: 3px solid #0a7b83; padding-bottom: 10px;">
-                    New BSE BANKEX Announcement
-                </h2>
-                
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="color: #0a7b83; margin-top: 0;">${announcement.company_name}</h3>
-                    <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>BSE Code:</strong> ${announcement.company_code || 'N/A'} | 
-                        <strong>Category:</strong> ${announcement.category || 'Other'}
-                    </p>
-                    <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>Exchange:</strong> ${announcement.exchange || 'BSE'} | 
-                        <strong>Index:</strong> ${announcement.index_name || 'BANKEX'}
-                    </p>
-                </div>
-
-                <div style="margin: 20px 0;">
-                    <h4 style="color: #2c3e50; margin-bottom: 10px;">Subject:</h4>
-                    <p style="color: #343a40; line-height: 1.6;">${announcement.subject}</p>
-                </div>
-
-                ${announcement.summary && announcement.summary !== announcement.subject ? `
-                <div style="background: #e0f2fe; border-left: 4px solid #0a7b83; padding: 15px; margin: 20px 0;">
-                    <h4 style="color: #0a7b83; margin-top: 0;">🤖 AI Summary:</h4>
-                    <p style="color: #343a40; line-height: 1.6; margin: 0;">${announcement.summary}</p>
-                </div>
-                ` : ''}
-
-                ${announcement.title && announcement.title !== announcement.subject ? `
-                <div style="margin: 20px 0; padding: 10px; background: #fff3cd; border-radius: 6px;">
-                    <p style="color: #856404; margin: 0; font-size: 13px;">
-                        <strong>Title:</strong> ${announcement.title}
-                    </p>
-                </div>
-                ` : ''}
-
-                <div style="margin: 20px 0; background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>📅 Filing Date:</strong> ${formatIST(announcement.filed_at, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
-                    </p>
-                    <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>📝 Scraped:</strong> ${announcement.scraped_at ? formatIST(announcement.scraped_at) : 'Just now'}
-                    </p>
-                    ${announcement.source_page ? `
-                    <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
-                        <strong>🔗 Source:</strong> <a href="${announcement.source_page}" style="color: #0a7b83;">View on BSE</a>
-                    </p>
-                    ` : ''}
-                </div>
-
-                ${hasScreenshots ? `
-                <div style="margin: 30px 0;">
-                    <h4 style="color: #2c3e50; margin-bottom: 15px;">📄 Document Preview:</h4>
-                    ${imageUrls.map((img, idx) => {
-                        const isAnnouncement = img.type === 'announcement';
-                        const isPdfPage = img.type === 'pdf_page';
-                        const label = isAnnouncement ? 'Announcement Details' : 
-                                     isPdfPage ? `PDF Page ${img.page_number}` : 
-                                     `Image ${idx + 1}`;
-                        
-                        // Handle both URLs and base64 data
-                        const imgSrc = img.isBase64 ? `data:image/png;base64,${img.url}` : img.url;
-                        
-                        return `
-                        <div style="margin-bottom: 20px;">
-                            <p style="color: #6c757d; font-size: 13px; font-weight: 600; margin-bottom: 8px;">
-                                ${label}
-                            </p>
-                            <div style="border: 2px solid ${isAnnouncement ? '#0a7b83' : '#dee2e6'}; border-radius: 8px; overflow: hidden; background: white;">
-                                <img src="${imgSrc}" 
-                                     alt="${label}" 
-                                     style="width: 100%; height: auto; display: block; max-height: 1000px; object-fit: contain;">
-                            </div>
-                        </div>
-                        `;
-                    }).join('')}
-                </div>
-                ` : `
-                <div style="margin: 30px 0; background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 6px;">
-                    <p style="color: #856404; margin: 0; font-weight: 600;">
-                        ⚠️ Document Preview Not Available
-                    </p>
-                    <p style="color: #856404; margin: 8px 0 0 0; font-size: 13px;">
-                        Screenshots could not be captured during scraping. Please download the full PDF document using the button below.
-                    </p>
-                </div>
-                `}
-
-                ${announcement.pdf_url ? `
-                <div style="margin: 30px 0; text-align: center;">
-                    <a href="${announcement.pdf_url}" 
-                       style="background: #0a7b83; color: white; padding: 14px 28px; 
-                              text-decoration: none; border-radius: 6px; display: inline-block;
-                              font-weight: bold; font-size: 15px; box-shadow: 0 2px 4px rgba(10,123,131,0.3);">
-                        📥 Download Full PDF Document
-                    </a>
-                    <p style="color: #6c757d; font-size: 11px; margin-top: 10px;">
-                        Click above to view the complete disclosure document
-                    </p>
-                </div>
-                ` : ''}
-
-                <hr style="border: none; border-top: 1px solid #dee2e6; margin: 30px 0;">
-                
-                <div style="text-align: center; color: #6c757d; font-size: 11px;">
-                    <p style="margin: 5px 0;">
-                        <strong>BSE BANKEX Corporate Announcements Dashboard</strong>
-                    </p>
-                    <p style="margin: 5px 0;">
-                        Automated notification system with AI-powered summaries
-                    </p>
-                    <p style="margin: 5px 0; opacity: 0.7;">
-                        Announcement ID: ${announcement.id ? announcement.id.substring(0, 8) : 'N/A'}
-                    </p>
-                </div>
+    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
+    
+    sendSmtpEmail.sender = { name: emailFromName, email: emailFrom };
+    sendSmtpEmail.to = recipients;
+    sendSmtpEmail.subject = `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${subjectDate}`;
+    sendSmtpEmail.htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+            <h2 style="color: #1a2332; border-bottom: 3px solid #0a7b83; padding-bottom: 10px;">
+                New BSE BANKEX Announcement
+            </h2>
+            
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="color: #0a7b83; margin-top: 0;">${announcement.company_name}</h3>
+                <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
+                    <strong>BSE Code:</strong> ${announcement.company_code || 'N/A'} | 
+                    <strong>Category:</strong> ${announcement.category || 'Other'}
+                </p>
+                <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
+                    <strong>Exchange:</strong> ${announcement.exchange || 'BSE'} | 
+                    <strong>Index:</strong> ${announcement.index_name || 'BANKEX'}
+                </p>
             </div>
-        `
-    };
+
+            <div style="margin: 20px 0;">
+                <h4 style="color: #2c3e50; margin-bottom: 10px;">Subject:</h4>
+                <p style="color: #343a40; line-height: 1.6;">${announcement.subject}</p>
+            </div>
+
+            ${announcement.summary && announcement.summary !== announcement.subject ? `
+            <div style="background: #e0f2fe; border-left: 4px solid #0a7b83; padding: 15px; margin: 20px 0;">
+                <h4 style="color: #0a7b83; margin-top: 0;">🤖 AI Summary:</h4>
+                <p style="color: #343a40; line-height: 1.6; margin: 0;">${announcement.summary}</p>
+            </div>
+            ` : ''}
+
+            ${announcement.title && announcement.title !== announcement.subject ? `
+            <div style="margin: 20px 0; padding: 10px; background: #fff3cd; border-radius: 6px;">
+                <p style="color: #856404; margin: 0; font-size: 13px;">
+                    <strong>Title:</strong> ${announcement.title}
+                </p>
+            </div>
+            ` : ''}
+
+            <div style="margin: 20px 0; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
+                    <strong>📅 Filing Date:</strong> ${formatIST(announcement.filed_at, { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                </p>
+                <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
+                    <strong>📝 Scraped:</strong> ${announcement.scraped_at ? formatIST(announcement.scraped_at) : 'Just now'}
+                </p>
+                ${announcement.source_page ? `
+                <p style="color: #6c757d; font-size: 12px; margin: 5px 0;">
+                    <strong>🔗 Source:</strong> <a href="${announcement.source_page}" style="color: #0a7b83;">View on BSE</a>
+                </p>
+                ` : ''}
+            </div>
+
+            ${hasScreenshots ? `
+            <div style="margin: 30px 0;">
+                <h4 style="color: #2c3e50; margin-bottom: 15px;">📄 Document Preview:</h4>
+                ${imageUrls.map((img, idx) => {
+                    const isAnnouncement = img.type === 'announcement';
+                    const isPdfPage = img.type === 'pdf_page';
+                    const label = isAnnouncement ? 'Announcement Details' : 
+                                 isPdfPage ? `PDF Page ${img.page_number}` : 
+                                 `Image ${idx + 1}`;
+                    
+                    // Handle both URLs and base64 data
+                    const imgSrc = img.isBase64 ? `data:image/png;base64,${img.url}` : img.url;
+                    
+                    return `
+                    <div style="margin-bottom: 20px;">
+                        <p style="color: #6c757d; font-size: 13px; font-weight: 600; margin-bottom: 8px;">
+                            ${label}
+                        </p>
+                        <div style="border: 2px solid ${isAnnouncement ? '#0a7b83' : '#dee2e6'}; border-radius: 8px; overflow: hidden; background: white;">
+                            <img src="${imgSrc}" 
+                                 alt="${label}" 
+                                 style="width: 100%; height: auto; display: block; max-height: 1000px; object-fit: contain;">
+                        </div>
+                    </div>
+                    `;
+                }).join('')}
+            </div>
+            ` : `
+            <div style="margin: 30px 0; background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 6px;">
+                <p style="color: #856404; margin: 0; font-weight: 600;">
+                    ⚠️ Document Preview Not Available
+                </p>
+                <p style="color: #856404; margin: 8px 0 0 0; font-size: 13px;">
+                    Screenshots could not be captured during scraping. Please download the full PDF document using the button below.
+                </p>
+            </div>
+            `}
+
+            ${announcement.pdf_url ? `
+            <div style="margin: 30px 0; text-align: center;">
+                <a href="${announcement.pdf_url}" 
+                   style="background: #0a7b83; color: white; padding: 14px 28px; 
+                          text-decoration: none; border-radius: 6px; display: inline-block;
+                          font-weight: bold; font-size: 15px; box-shadow: 0 2px 4px rgba(10,123,131,0.3);">
+                    📥 Download Full PDF Document
+                </a>
+                <p style="color: #6c757d; font-size: 11px; margin-top: 10px;">
+                    Click above to view the complete disclosure document
+                </p>
+            </div>
+            ` : ''}
+
+            <hr style="border: none; border-top: 1px solid #dee2e6; margin: 30px 0;">
+            
+            <div style="text-align: center; color: #6c757d; font-size: 11px;">
+                <p style="margin: 5px 0;">
+                    <strong>BSE BANKEX Corporate Announcements Dashboard</strong>
+                </p>
+                <p style="margin: 5px 0;">
+                    Automated notification system with AI-powered summaries
+                </p>
+                <p style="margin: 5px 0; opacity: 0.7;">
+                    Announcement ID: ${announcement.id ? announcement.id.substring(0, 8) : 'N/A'}
+                </p>
+            </div>
+        </div>
+    `;
 
     try {
-        const { data, error } = await resend.emails.send(emailOptions);
-        
-        if (error) {
-            console.error(`   [Email Error] ${error.message}`);
-            return { success: false, error: error.message };
-        }
-        
-        console.log(`   [Email] Message sent: ${data.id}`);
-        return { success: true };
+        const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
+        console.log(`   [Email] Message sent: ${data.messageId}`);
+        return { success: true, messageId: data.messageId };
     } catch (error) {
         console.error(`   [Email Error] ${error.message}`);
 
         // Provide specific guidance based on error type
-        if (error.message.includes('API key')) {
-            console.error('   [Email Error] Invalid API key. Check RESEND_API_KEY');
-        } else if (error.message.includes('from')) {
+        if (error.message.includes('API key') || error.message.includes('Unauthorized')) {
+            console.error('   [Email Error] Invalid API key. Check BREVO_API_KEY');
+        } else if (error.message.includes('sender') || error.message.includes('from')) {
             console.error('   [Email Error] Invalid sender email. Check EMAIL_FROM');
+            console.error('   [Email Error] Make sure the sender email is verified in Brevo');
+        } else if (error.message.includes('recipient') || error.message.includes('to')) {
+            console.error('   [Email Error] Invalid recipient email. Check EMAIL_TO');
         }
 
         return { success: false, error: error.message };

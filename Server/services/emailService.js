@@ -118,7 +118,16 @@ async function sendEmail(announcement) {
 
     const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
     
-    sendSmtpEmail.sender = { name: emailFromName, email: emailFrom };
+    sendSmtpEmail.sender = { 
+    name: emailFromName, 
+    email: emailFrom 
+};
+
+sendSmtpEmail.replyTo = {
+    email: "no-reply@brevo-mail.com",
+    name: "No Reply"
+};
+
     sendSmtpEmail.to = recipients;
     sendSmtpEmail.subject = `BSE Announcement: ${announcement.company_name} - ${announcement.category || 'Update'} | ${subjectDate}`;
     sendSmtpEmail.htmlContent = `

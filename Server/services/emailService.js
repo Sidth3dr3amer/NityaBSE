@@ -1,11 +1,14 @@
-const SibApiV3Sdk = require('@getbrevo/brevo');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 const pool = require('../config/db');
 require('dotenv').config();
 
-// Create Brevo API client
-const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-const apiKey = apiInstance.authentications['apiKey'];
+// Configure Brevo API client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications['api-key'];
 apiKey.apiKey = process.env.BREVO_API_KEY;
+
+// Create transactional email API instance
+const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
 // Helper: format dates in IST (Asia/Kolkata)
 function formatIST(date, options = {}) {
@@ -39,7 +42,6 @@ console.log(`  EMAIL_TO: ${process.env.EMAIL_TO ? '✓ Set (' + process.env.EMAI
         if (process.env.BREVO_API_KEY && process.env.EMAIL_FROM) {
             // Test API connection by getting account info
             const accountApi = new SibApiV3Sdk.AccountApi();
-            accountApi.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY;
             
             try {
                 const account = await accountApi.getAccount();
